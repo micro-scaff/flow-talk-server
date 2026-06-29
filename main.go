@@ -43,8 +43,10 @@ func main() {
 	if err := engine.SetTrustedProxies(nil); err != nil {
 		log.Fatalf("设置 Gin trusted proxies 失败: %v", err)
 	}
+
 	// 暴露 static 目录，后续上传文件、图片、前端静态资源都可以先放这里。
 	engine.Static("/static", "./static")
+
 	// 6. 注册业务路由。
 	// 路由文件只负责把 URL 绑定到 controller，具体业务逻辑放在 controllers/models。
 	routers.InitRouter(engine, cfg)
