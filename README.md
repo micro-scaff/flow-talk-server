@@ -1,6 +1,28 @@
 # flow-talk-server
 
-流言：一个基于 Go + MySQL 的即时通讯服务。
+流言：一个基于 Gin + GORM + MySQL 的即时通讯服务。
+
+## 项目目录
+
+```text
+flow-talk-server
+├─ conf
+│  └─ app.ini                  本地配置文件，保存 MySQL、HTTP、JWT 配置
+├─ controllers
+│  ├─ auth_controller.go       注册、登录、当前用户接口
+│  └─ user_controller.go       获取数据库中的所有 user 信息
+├─ middlewares
+│  └─ auth.go                  Gin JWT 鉴权中间件
+├─ models
+│  ├─ database.go              读取配置、连接 GORM/MySQL、管理数据库连接
+│  └─ user_model.go            users 表映射和用户查询/注册/登录方法
+├─ routers
+│  └─ router.go                Gin 路由注册
+├─ static                      静态资源目录
+├─ runner.conf                 fresh 热重载配置
+├─ go.mod
+└─ main.go                     服务入口
+```
 
 ## 第一版目标
 
@@ -8,7 +30,7 @@
 
 ## 本地启动
 
-服务默认读取项目根目录的 `config.ini`。当前本地 MySQL 配置如下：
+服务默认读取项目根目录的 `conf/app.ini`。当前本地配置如下：
 
 ```ini
 [mysql]
@@ -18,6 +40,14 @@ username = root
 password = admin
 database = flow_talk
 parse_time = true
+
+[http]
+addr = :8080
+mode = debug
+
+[jwt]
+secret = dev-secret
+ttl = 24h
 ```
 
 启动服务：
@@ -26,7 +56,21 @@ parse_time = true
 go run .
 ```
 
-如需临时覆盖配置，可以使用 `MYSQL_DSN`、`HTTP_ADDR`、`JWT_SECRET`、`JWT_TTL` 环境变量。
+使用 fresh 热重载启动：
+
+```bash
+go install github.com/pilu/fresh@latest
+fresh
+```
+
+当前可调用接口：
+
+```text
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/me
+GET  /admin/users
+```
 
 核心能力：
 
@@ -101,6 +145,7 @@ CREATE TABLE users (
 - `username`：本地登录账号；外部用户接入后可使用外部账号名或生成稳定用户名
 - `password`：本地用户明文密码；外部用户可为空
 - `nickname`：IM 展示昵称，可本地设置或由外部系统同步
+- `avatar_url` 用户头像
 - `auth_source`：用户来源，`local` 表示本地注册，`external` 表示外部系统同步
 - `status`：用户状态，第一版可用 `1` 表示正常，`0` 表示禁用
 
