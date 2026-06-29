@@ -90,6 +90,7 @@ CREATE TABLE users (
 CREATE TABLE conversations (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   type ENUM('direct', 'group') NOT NULL,
+  direct_key VARCHAR(64) NULL,
   title VARCHAR(128) NULL,
   avatar_url VARCHAR(255) NULL,
   owner_id BIGINT NULL,
@@ -97,6 +98,7 @@ CREATE TABLE conversations (
   last_message_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_conversations_direct_key (direct_key),
   KEY idx_conversations_last_message_at (last_message_at),
   KEY idx_conversations_owner_id (owner_id)
 );
@@ -105,9 +107,12 @@ CREATE TABLE conversations (
 字段说明：
 
 - `type`：`direct` 表示单聊，`group` 表示群聊
+- `direct_key`：单聊会话唯一键，格式建议为 `min_user_id:max_user_id`；群聊为空
 - `title`：群聊名称；单聊可为空，由客户端根据对方用户展示
 - `owner_id`：群主用户 ID；单聊可为空
 - `last_message_id` / `last_message_at`：用于会话列表排序
+
+单聊创建时，服务端必须先对两个用户 ID 排序并生成 `direct_key`，通过 `uk_conversations_direct_key` 防止重复创建单聊会话。
 
 ### conversation_members
 
@@ -249,6 +254,128 @@ messages 1 - N message_receipts
 - `message_receipts`
 
 暂缓原因：会话级未读数可以通过 `conversation_members.last_read_message_id` 和 `messages.id` 计算。逐条消息已读详情属于更细粒度能力，可以在后续版本加入。
+
+## 最小接口契约
+
+第一版建议先实现以下 HTTP 接口，确保注册登录、单聊、群聊、历史消息和未读数能闭环。
+
+### 认证接口
+
+```text
+POST /api/auth/register
+POST /api/auth/login
+```
+
+注册成功后创建 `users` 记录。登录成功后返回 JWT，后续 HTTP 和 WebSocket 请求都携带该 token。
+
+### 会话接口
+
+```text
+GET  /api/conversations
+POST /api/conversations/direct
+POST /api/conversations/groups
+GET  /api/conversations/{conversation_id}/messages
+POST /api/conversations/{conversation_id}/read
+```
+
+- `GET /api/conversations`：返回当前用户的会话列表、最后一条消息和未读数
+- `POST /api/conversations/direct`：创建或获取一个单聊会话
+- `POST /api/conversations/groups`：创建群聊并写入群成员
+- `GET /api/conversations/{conversation_id}/messages`：分页拉取历史消息
+- `POST /api/conversations/{conversation_id}/read`：更新 `last_read_message_id`
+
+### 设备接口
+
+```text
+POST /api/devices
+```
+
+用于上报 `device_id`、`platform`、`push_token`，为后续离线推送预留。
+
+## WebSocket 协议
+
+WebSocket 连接建议使用：
+
+```text
+GET /ws?token={jwt}&device_id={device_id}
+```
+
+客户端发送消息：
+
+```json
+{
+  "type": "message.send",
+  "request_id": "req-001",
+  "payload": {
+    "conversation_id": 1,
+    "client_msg_id": "client-001",
+    "message_type": "text",
+    "content": {
+      "text": "hello"
+    }
+  }
+}
+```
+
+服务端确认消息：
+
+```json
+{
+  "type": "message.ack",
+  "request_id": "req-001",
+  "payload": {
+    "message_id": 1001,
+    "conversation_id": 1,
+    "client_msg_id": "client-001"
+  }
+}
+```
+
+服务端投递消息：
+
+```json
+{
+  "type": "message.deliver",
+  "payload": {
+    "message_id": 1001,
+    "conversation_id": 1,
+    "sender_id": 2,
+    "message_type": "text",
+    "content": {
+      "text": "hello"
+    },
+    "sent_at": "2026-06-29T12:00:00+08:00"
+  }
+}
+```
+
+第一版需要支持心跳：
+
+```json
+{
+  "type": "ping"
+}
+```
+
+服务端返回：
+
+```json
+{
+  "type": "pong"
+}
+```
+
+## 落地检查
+
+当前方案可以落地，首版实现时需要注意以下边界：
+
+- 单聊必须使用 `direct_key` 做唯一约束，避免 A-B 重复创建多个单聊会话。
+- 发送消息、更新会话最后消息需要放在同一个数据库事务中。
+- 创建群聊时，需要在同一个事务中写入 `conversations` 和 `conversation_members`。
+- `client_msg_id` 必须由客户端生成，服务端用 `(sender_id, client_msg_id)` 保证重试幂等。
+- 未读数第一版可以实时查询计算；如果数据量变大，再引入缓存或冗余计数字段。
+- WebSocket 在线连接第一版可以只保存在单进程内存中；多实例部署时再引入 Redis 或消息队列。
+- 文件和图片消息第一版只保存 URL，不负责文件上传存储；文件服务可独立建设。
 
 ## 典型流程
 
