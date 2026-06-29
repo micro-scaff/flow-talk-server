@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 
 	"flow-talk/models"
@@ -18,6 +19,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
+
+	cfgJSON, err := json.MarshalIndent(cfg.LogFields(), "", "  ")
+	if err != nil {
+		log.Fatalf("格式化配置日志失败: %v", err)
+	}
+	log.Printf("当前配置:\n%s", cfgJSON)
 
 	// 2. 设置 Gin 运行模式。
 	// debug 模式会打印详细路由和请求日志，release 模式更适合线上环境。

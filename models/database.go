@@ -37,6 +37,30 @@ type AppConfig struct {
 	JWT JWTConfig
 }
 
+// LogFields 返回适合启动日志打印的配置摘要。
+// 注意：这里会隐藏 password 和 jwt.secret，避免本地调试日志泄露敏感信息。
+func (cfg AppConfig) LogFields() map[string]any {
+	return map[string]any{
+		"mysql": map[string]any{
+			"host":       cfg.MySQL.Host,
+			"port":       cfg.MySQL.Port,
+			"username":   cfg.MySQL.Username,
+			"password":   maskSecret(cfg.MySQL.Password),
+			"database":   cfg.MySQL.Database,
+			"parse_time": cfg.MySQL.ParseTime,
+			"dsn":        maskDSN(cfg.MySQL.DSN),
+		},
+		"http": map[string]any{
+			"addr": cfg.HTTP.Addr,
+			"mode": cfg.HTTP.Mode,
+		},
+		"jwt": map[string]any{
+			"secret": maskSecret(cfg.JWT.Secret),
+			"ttl":    cfg.JWT.TTL.String(),
+		},
+	}
+}
+
 // MySQLConfig 保存数据库连接配置。
 type MySQLConfig struct {
 	// Host / Port 对应 MySQL 连接地址，例如 127.0.0.1:3306。
@@ -156,6 +180,23 @@ func (cfg MySQLConfig) BuildDSN() (string, error) {
 	// charset=utf8mb4 支持 emoji 等完整 Unicode 字符。
 	// loc=Local 让时间按本地时区解析，配合 parseTime 使用。
 	return fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=%t&loc=Local", cfg.Username, cfg.Password, addr, cfg.Database, cfg.ParseTime), nil
+}
+
+func maskSecret(value string) string {
+	if value == "" {
+		return ""
+	}
+	return "******"
+}
+
+func maskDSN(value string) string {
+	if value == "" {
+		return ""
+	}
+	if at := strings.Index(value, "@"); at >= 0 {
+		return "******" + value[at:]
+	}
+	return "******"
 }
 
 // InitDB 创建并保存 GORM 数据库连接。
