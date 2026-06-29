@@ -31,3 +31,6 @@ go.work.sum
 # .idea/
 # .vscode/
 tmp/**
+
+# Local Go build cache for sandboxed test runs
+.gocache/

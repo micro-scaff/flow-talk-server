@@ -6,6 +6,28 @@
 
 第一版实现一个群聊基础版 IM 服务，覆盖完整的即时通讯主流程，同时为后续扩展预留接口。
 
+## 本地启动
+
+服务默认读取项目根目录的 `config.ini`。当前本地 MySQL 配置如下：
+
+```ini
+[mysql]
+host = 127.0.0.1
+port = 3306
+username = root
+password = admin
+database = flow_talk
+parse_time = true
+```
+
+启动服务：
+
+```bash
+go run .
+```
+
+如需临时覆盖配置，可以使用 `MYSQL_DSN`、`HTTP_ADDR`、`JWT_SECRET`、`JWT_TTL` 环境变量。
+
 核心能力：
 
 - 当前阶段提供内置用户注册、登录、JWT 鉴权
@@ -61,7 +83,7 @@ CREATE TABLE users (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   external_id VARCHAR(128) NULL,
   username VARCHAR(64) NOT NULL,
-  password_hash VARCHAR(255) NULL,
+  password VARCHAR(255) NULL,
   nickname VARCHAR(64) NOT NULL,
   avatar_url VARCHAR(255) NULL,
   auth_source ENUM('local', 'external') NOT NULL DEFAULT 'local',
@@ -77,7 +99,7 @@ CREATE TABLE users (
 
 - `external_id`：外部登录系统中的用户 ID，本地用户可为空
 - `username`：本地登录账号；外部用户接入后可使用外部账号名或生成稳定用户名
-- `password_hash`：本地用户密码哈希；外部用户可为空
+- `password`：本地用户明文密码；外部用户可为空
 - `nickname`：IM 展示昵称，可本地设置或由外部系统同步
 - `auth_source`：用户来源，`local` 表示本地注册，`external` 表示外部系统同步
 - `status`：用户状态，第一版可用 `1` 表示正常，`0` 表示禁用
@@ -381,7 +403,7 @@ GET /ws?token={jwt}&device_id={device_id}
 
 ### 当前阶段登录
 
-1. 客户端调用注册接口创建本地用户，服务端写入 `users`，并保存 `password_hash`。
+1. 客户端调用注册接口创建本地用户，服务端写入 `users`，并保存明文 `password`。
 2. 客户端调用登录接口提交 `username` 和密码。
 3. 服务端校验密码后签发 JWT。
 4. 客户端访问 IM HTTP 或 WebSocket 接口时携带 JWT。
