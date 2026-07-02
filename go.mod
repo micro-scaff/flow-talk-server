@@ -1,9 +1,10 @@
 module flow-talk
 
-go 1.25.4
+go 1.25.0
 
 require (
 	github.com/gin-gonic/gin v1.12.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/pilu/fresh v0.0.0-20240621171608-8d1fef547a99
 	gopkg.in/ini.v1 v1.67.3
 	gorm.io/driver/mysql v1.6.0
@@ -24,7 +25,6 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/howeyc/fsnotify v0.9.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect

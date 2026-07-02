@@ -34,3 +34,7 @@ tmp/**
 
 # Local Go build cache for sandboxed test runs
 .gocache/
+.gomodcache/
+
+# Project-local Go tools installed by Makefile
+.bin/

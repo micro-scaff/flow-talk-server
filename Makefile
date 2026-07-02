@@ -1,12 +1,19 @@
 GO_CACHE_DIR := $(CURDIR)/.gocache
-GO_ENV := GOCACHE=$(GO_CACHE_DIR)
-GO_PATH := $(shell go env GOPATH)
-FRESH_BIN := $(GO_PATH)/bin/fresh
+GO_MODCACHE_DIR := $(CURDIR)/.gomodcache
+GO_BIN_DIR := $(CURDIR)/.bin
+GO_PROXY ?= https://goproxy.cn,direct
+GO_TOOLCHAIN ?= local
+GO_ENV := GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MODCACHE_DIR) GOBIN=$(GO_BIN_DIR) GOPROXY=$(GO_PROXY) GOTOOLCHAIN=$(GO_TOOLCHAIN)
+FRESH_BIN := $(GO_BIN_DIR)/fresh
+FRESH_VERSION := v0.0.0-20240621171608-8d1fef547a99
 
-.PHONY: run test vet fresh cache-env
+.PHONY: run tidy test vet fresh install-fresh
 
 run:
 	$(GO_ENV) go run .
+
+tidy:
+	$(GO_ENV) go mod tidy
 
 test:
 	$(GO_ENV) go test ./...
@@ -15,7 +22,9 @@ vet:
 	$(GO_ENV) go vet ./...
 
 fresh:
+	@if [ ! -x "$(FRESH_BIN)" ]; then $(MAKE) install-fresh; fi
 	$(GO_ENV) $(FRESH_BIN)
 
-cache-env:
-	go env -w GOCACHE=$(GO_CACHE_DIR)
+install-fresh:
+	mkdir -p $(GO_BIN_DIR)
+	$(GO_ENV) go install github.com/pilu/fresh@$(FRESH_VERSION)

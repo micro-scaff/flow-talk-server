@@ -29,14 +29,16 @@ flow-talk-server
 
 ## 环境要求
 
-- Go：项目 `go.mod` 当前要求 `go 1.25.4`
+- Go：1.25+
 - MySQL：本地默认连接 `127.0.0.1:3306`
 - fresh：可选，仅热重载开发时需要
 
-如果本机 Go 版本低于项目要求，Go 会尝试自动下载对应 toolchain。若遇到 `toolchain not available`，可以直接安装 Go 1.25.4，或切换到支持 toolchain 下载的代理：
+本项目通过 `Makefile` 将 Go 缓存、module 缓存和 fresh 安装目录放在项目内，不修改全局 Go 配置。
+
+默认项目级代理为 `https://goproxy.cn,direct`。如果需要临时换代理，可以只对当前命令生效：
 
 ```bash
-go env -w GOPROXY=https://proxy.golang.org,direct
+make run GO_PROXY=https://proxy.golang.org,direct
 ```
 
 ## 本地配置
@@ -72,19 +74,13 @@ CREATE DATABASE flow_talk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ## 安装依赖
 
 ```bash
-go mod tidy
+make tidy
 ```
 
-热重载开发需要额外安装 fresh：
+热重载开发安装 fresh：
 
 ```bash
-go install github.com/pilu/fresh@v0.0.0-20240621171608-8d1fef547a99
-```
-
-安装后确认可执行文件存在：
-
-```bash
-test -x "$(go env GOPATH)/bin/fresh"
+make install-fresh
 ```
 
 ## 启动项目
@@ -93,12 +89,6 @@ test -x "$(go env GOPATH)/bin/fresh"
 
 ```bash
 make run
-```
-
-等价于：
-
-```bash
-GOCACHE=$(pwd)/.gocache go run .
 ```
 
 热重载启动：
@@ -123,13 +113,12 @@ ws://localhost:8080/ws
 
 ```text
 make run        普通方式启动服务
+make tidy       整理 Go module 依赖
 make fresh      使用 fresh 热重载启动服务
+make install-fresh 安装 fresh 热重载工具
 make test       运行测试和编译检查
 make vet        运行 Go 静态检查
-make cache-env  将 Go 默认 GOCACHE 设置到当前项目的 .gocache
 ```
-
-`Makefile` 会把 Go 编译缓存写入项目内的 `.gocache/`，fresh 的临时构建文件写入 `tmp/`。
 
 ## 接口入口
 
@@ -154,30 +143,16 @@ GET  /ws
 
 ## 常见问题
 
-### go: toolchain not available
-
-项目要求 `go 1.25.4`，本机 Go 版本较低时会自动下载 toolchain。若当前代理不支持下载，会出现该错误。
-
-可选处理方式：
+### 代理下载失败
 
 ```bash
-go env -w GOPROXY=https://proxy.golang.org,direct
+make tidy GO_PROXY=https://proxy.golang.org,direct
+make fresh GO_PROXY=https://proxy.golang.org,direct
 ```
 
-或者直接安装 Go 1.25.4 后重新执行：
+### fresh 不存在
 
 ```bash
-go version
-go mod tidy
-```
-
-### make fresh 报 /bin/fresh: No such file or directory
-
-说明 `fresh` 没有安装成功，或者 `go env GOPATH` 因 toolchain 问题没有正常返回。
-
-先解决 Go 版本或 toolchain 下载问题，再安装 fresh：
-
-```bash
-go install github.com/pilu/fresh@v0.0.0-20240621171608-8d1fef547a99
+make install-fresh
 make fresh
 ```
