@@ -42,6 +42,16 @@ var (
 	ErrInvalidMember = errors.New("无效会话成员")
 	// ErrCannotCreateDirectWithSelf 表示用户不能和自己创建单聊。
 	ErrCannotCreateDirectWithSelf = errors.New("不能和自己创建单聊")
+	// ErrGroupOnly 表示当前操作只允许群聊使用。
+	ErrGroupOnly = errors.New("该操作只支持群聊")
+	// ErrPermissionDenied 表示当前成员角色没有管理权限。
+	ErrPermissionDenied = errors.New("权限不足")
+	// ErrCannotRemoveOwner 表示不能把群主从群里移除。
+	ErrCannotRemoveOwner = errors.New("不能移除群主")
+	// ErrOwnerCannotLeave 表示群主不能直接退出群聊。
+	ErrOwnerCannotLeave = errors.New("群主不能直接退出群聊")
+	// ErrInvalidMemberRole 表示角色不是 owner/admin/member 允许范围内的可变角色。
+	ErrInvalidMemberRole = errors.New("无效成员角色")
 
 	// errDirectConversationRace 是内部哨兵错误，用来处理并发创建同一个单聊时的唯一键冲突。
 	errDirectConversationRace = errors.New("单聊会话已被并发创建")
@@ -96,14 +106,16 @@ type ConversationDTO struct {
 }
 
 type ConversationListItemDTO struct {
-	ID            int64  `json:"id"`
-	Type          string `json:"type"`
-	Title         string `json:"title"`
-	AvatarURL     string `json:"avatar_url"`
-	OwnerID       int64  `json:"owner_id"`
-	MemberCount   int64  `json:"member_count"`
-	LastMessageID int64  `json:"last_message_id"`
-	LastMessageAt string `json:"last_message_at"`
+	ID            int64       `json:"id"`
+	Type          string      `json:"type"`
+	Title         string      `json:"title"`
+	AvatarURL     string      `json:"avatar_url"`
+	OwnerID       int64       `json:"owner_id"`
+	MemberCount   int64       `json:"member_count"`
+	LastMessageID int64       `json:"last_message_id"`
+	LastMessageAt string      `json:"last_message_at"`
+	LastMessage   *MessageDTO `json:"last_message,omitempty"`
+	UnreadCount   int64       `json:"unread_count"`
 }
 
 type ConversationDetailDTO struct {
@@ -237,8 +249,8 @@ func ListConversations(userID int64) ([]ConversationListItemDTO, error) {
 	if userID <= 0 {
 		return nil, ErrInvalidMember
 	}
-	// v2 还没有消息表查询，这里只返回会话本体和 active 成员数。
-	// v3 会在这个查询基础上增加最后消息和未读数。
+	// 先查会话基础信息，再逐个补最后消息和未读数。
+	// 这样 SQL 更容易读；后续会话量很大时再做批量优化。
 	var rows []conversationListRow
 	err := DB.Table("conversation_members AS cm").
 		Select(`c.id, c.type, c.title, c.avatar_url, c.owner_id, c.last_message_id, c.last_message_at,
@@ -253,7 +265,11 @@ func ListConversations(userID int64) ([]ConversationListItemDTO, error) {
 
 	result := make([]ConversationListItemDTO, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, row.ToDTO())
+		item, err := row.ToDTO(userID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
 	}
 	return result, nil
 }
@@ -297,6 +313,253 @@ func EnsureActiveMember(userID int64, conversationID int64) (ConversationMember,
 		return ConversationMember{}, fmt.Errorf("查询会话成员失败: %w", err)
 	}
 	return member, nil
+}
+
+// ListActiveConversationMemberIDs 返回某个会话内所有 active 成员 ID。
+// WebSocket 投递、回执写入和后续通知逻辑都使用这个方法，避免各处重复拼接成员查询 SQL。
+func ListActiveConversationMemberIDs(conversationID int64) ([]int64, error) {
+	if conversationID <= 0 {
+		return nil, ErrConversationNotFound
+	}
+	var userIDs []int64
+	err := DB.Model(&ConversationMember{}).
+		Where("conversation_id = ? AND status = ?", conversationID, MemberStatusActive).
+		Order("id asc").
+		Pluck("user_id", &userIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("查询会话成员失败: %w", err)
+	}
+	return userIDs, nil
+}
+
+// EnsureGroupConversation 查询并确认会话是群聊。
+// 群管理接口必须先走这个方法，避免单聊误用群成员管理能力。
+func EnsureGroupConversation(conversationID int64) (Conversation, error) {
+	if conversationID <= 0 {
+		return Conversation{}, ErrConversationNotFound
+	}
+	var conversation Conversation
+	err := DB.First(&conversation, conversationID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Conversation{}, ErrConversationNotFound
+	}
+	if err != nil {
+		return Conversation{}, fmt.Errorf("查询会话失败: %w", err)
+	}
+	if conversation.Type != ConversationTypeGroup {
+		return Conversation{}, ErrGroupOnly
+	}
+	return conversation, nil
+}
+
+// AddGroupMembers 添加群成员，包含“已退出/被移除成员重新激活”的逻辑。
+func AddGroupMembers(operatorID int64, conversationID int64, userIDs []int64) ([]ConversationMemberDTO, error) {
+	if len(userIDs) == 0 {
+		return nil, ErrInvalidMember
+	}
+	userIDs = uniquePositiveIDs(userIDs)
+	if len(userIDs) == 0 {
+		return nil, ErrInvalidMember
+	}
+	if err := ensureUsersExist(userIDs); err != nil {
+		return nil, err
+	}
+
+	var result []ConversationMemberDTO
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
+			return err
+		}
+		operator, err := ensureActiveMemberWithConversationDB(tx, operatorID, conversationID)
+		if err != nil {
+			return err
+		}
+		if operator.Role != MemberRoleOwner && operator.Role != MemberRoleAdmin {
+			return ErrPermissionDenied
+		}
+
+		members := make([]ConversationMember, 0, len(userIDs))
+		for _, userID := range userIDs {
+			member, err := findMemberWithDB(tx, conversationID, userID)
+			if errors.Is(err, ErrInvalidMember) {
+				member = ConversationMember{
+					ConversationID: conversationID,
+					UserID:         userID,
+					Role:           MemberRoleMember,
+					Status:         MemberStatusActive,
+				}
+				if err := tx.Create(&member).Error; err != nil {
+					return err
+				}
+				members = append(members, member)
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if member.Status != MemberStatusActive {
+				if err := tx.Model(&member).Updates(map[string]any{
+					"role":      MemberRoleMember,
+					"status":    MemberStatusActive,
+					"joined_at": time.Now(),
+				}).Error; err != nil {
+					return err
+				}
+				member.Role = MemberRoleMember
+				member.Status = MemberStatusActive
+			}
+			members = append(members, member)
+		}
+
+		result = make([]ConversationMemberDTO, 0, len(members))
+		for _, member := range members {
+			result = append(result, member.ToDTO())
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("添加群成员失败: %w", err)
+	}
+	return result, nil
+}
+
+func RemoveGroupMember(operatorID int64, conversationID int64, targetUserID int64) error {
+	if targetUserID <= 0 {
+		return ErrInvalidMember
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
+			return err
+		}
+		operator, err := ensureActiveMemberWithConversationDB(tx, operatorID, conversationID)
+		if err != nil {
+			return err
+		}
+		target, err := ensureActiveMemberWithConversationDB(tx, targetUserID, conversationID)
+		if err != nil {
+			return err
+		}
+		if target.Role == MemberRoleOwner {
+			return ErrCannotRemoveOwner
+		}
+		if !CanManageGroupMember(operator, target) {
+			return ErrPermissionDenied
+		}
+		return tx.Model(&target).Update("status", MemberStatusRemoved).Error
+	})
+	if err != nil {
+		return fmt.Errorf("移除群成员失败: %w", err)
+	}
+	return nil
+}
+
+func LeaveGroup(userID int64, conversationID int64) error {
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
+			return err
+		}
+		member, err := ensureActiveMemberWithConversationDB(tx, userID, conversationID)
+		if err != nil {
+			return err
+		}
+		if member.Role == MemberRoleOwner {
+			return ErrOwnerCannotLeave
+		}
+		return tx.Model(&member).Update("status", MemberStatusLeft).Error
+	})
+	if err != nil {
+		return fmt.Errorf("退出群聊失败: %w", err)
+	}
+	return nil
+}
+
+func UpdateMemberRole(operatorID int64, conversationID int64, targetUserID int64, role string) (ConversationMemberDTO, error) {
+	role = strings.TrimSpace(role)
+	if role != MemberRoleAdmin && role != MemberRoleMember {
+		return ConversationMemberDTO{}, ErrInvalidMemberRole
+	}
+
+	var updated ConversationMember
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
+			return err
+		}
+		operator, err := ensureActiveMemberWithConversationDB(tx, operatorID, conversationID)
+		if err != nil {
+			return err
+		}
+		if operator.Role != MemberRoleOwner {
+			return ErrPermissionDenied
+		}
+		target, err := ensureActiveMemberWithConversationDB(tx, targetUserID, conversationID)
+		if err != nil {
+			return err
+		}
+		if target.Role == MemberRoleOwner {
+			return ErrInvalidMemberRole
+		}
+		if err := tx.Model(&target).Update("role", role).Error; err != nil {
+			return err
+		}
+		target.Role = role
+		updated = target
+		return nil
+	})
+	if err != nil {
+		return ConversationMemberDTO{}, fmt.Errorf("更新成员角色失败: %w", err)
+	}
+	return updated.ToDTO(), nil
+}
+
+func UpdateGroupProfile(operatorID int64, conversationID int64, title string, avatarURL string) (ConversationDTO, error) {
+	title = strings.TrimSpace(title)
+	avatarURL = strings.TrimSpace(avatarURL)
+	if title == "" {
+		return ConversationDTO{}, ErrValidation
+	}
+
+	var conversation Conversation
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		found, err := ensureGroupConversationWithDB(tx, conversationID)
+		if err != nil {
+			return err
+		}
+		operator, err := ensureActiveMemberWithConversationDB(tx, operatorID, conversationID)
+		if err != nil {
+			return err
+		}
+		if operator.Role != MemberRoleOwner && operator.Role != MemberRoleAdmin {
+			return ErrPermissionDenied
+		}
+		if err := tx.Model(&found).Updates(map[string]any{
+			"title":      optionalString(title),
+			"avatar_url": optionalString(avatarURL),
+		}).Error; err != nil {
+			return err
+		}
+		found.Title = optionalString(title)
+		found.AvatarURL = optionalString(avatarURL)
+		conversation = found
+		return nil
+	})
+	if err != nil {
+		return ConversationDTO{}, fmt.Errorf("修改群资料失败: %w", err)
+	}
+	return conversation.ToDTO(), nil
+}
+
+// CanManageGroupMember 表达 v6 权限矩阵中“操作者能否管理目标成员”的规则。
+func CanManageGroupMember(operator ConversationMember, target ConversationMember) bool {
+	if operator.Status != MemberStatusActive || target.Status != MemberStatusActive {
+		return false
+	}
+	if operator.Role == MemberRoleOwner {
+		return target.Role != MemberRoleOwner
+	}
+	if operator.Role == MemberRoleAdmin {
+		return target.Role == MemberRoleMember
+	}
+	return false
 }
 
 // ToDTO 把数据库模型转换为接口模型，并把 NULL 字段转成前端更容易消费的零值。
@@ -353,8 +616,8 @@ type conversationListRow struct {
 }
 
 // ToDTO 把列表查询行转换成稳定的响应结构。
-func (r conversationListRow) ToDTO() ConversationListItemDTO {
-	return ConversationListItemDTO{
+func (r conversationListRow) ToDTO(userID int64) (ConversationListItemDTO, error) {
+	item := ConversationListItemDTO{
 		ID:            r.ID,
 		Type:          r.Type,
 		Title:         stringValue(r.Title),
@@ -364,6 +627,19 @@ func (r conversationListRow) ToDTO() ConversationListItemDTO {
 		LastMessageID: int64Value(r.LastMessageID),
 		LastMessageAt: timeString(r.LastMessageAt),
 	}
+
+	lastMessage, err := findOptionalLastMessage(r.LastMessageID)
+	if err != nil {
+		return ConversationListItemDTO{}, err
+	}
+	item.LastMessage = lastMessage
+
+	unreadCount, err := countUnreadMessages(userID, r.ID)
+	if err != nil {
+		return ConversationListItemDTO{}, err
+	}
+	item.UnreadCount = unreadCount
+	return item, nil
 }
 
 func findDirectConversationByKey(directKey string) (Conversation, error) {
@@ -376,6 +652,36 @@ func findDirectConversationByKey(directKey string) (Conversation, error) {
 		return Conversation{}, fmt.Errorf("查询单聊会话失败: %w", err)
 	}
 	return conversation, nil
+}
+
+func findOptionalLastMessage(lastMessageID *int64) (*MessageDTO, error) {
+	if lastMessageID == nil || *lastMessageID <= 0 {
+		return nil, nil
+	}
+	message, err := FindMessageByID(*lastMessageID)
+	if errors.Is(err, ErrMessageNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	dto := message.ToDTO()
+	return &dto, nil
+}
+
+func countUnreadMessages(userID int64, conversationID int64) (int64, error) {
+	var count int64
+	err := DB.Table("messages AS m").
+		Joins("JOIN conversation_members cm ON cm.conversation_id = m.conversation_id").
+		Where("cm.conversation_id = ? AND cm.user_id = ? AND cm.status = ?", conversationID, userID, MemberStatusActive).
+		Where("m.sender_id <> ?", userID).
+		Where("m.id > COALESCE(cm.last_read_message_id, 0)").
+		Where("m.status = ?", MessageStatusNormal).
+		Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("计算未读数失败: %w", err)
+	}
+	return count, nil
 }
 
 func buildDirectMembers(conversationID int64, userID int64, targetUserID int64) []ConversationMember {
@@ -418,6 +724,70 @@ func buildGroupMemberIDs(ownerID int64, memberIDs []int64) []int64 {
 		return result[i] < result[j]
 	})
 	return result
+}
+
+func uniquePositiveIDs(ids []int64) []int64 {
+	seen := map[int64]bool{}
+	result := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		result = append(result, id)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i] < result[j]
+	})
+	return result
+}
+
+func ensureGroupConversationWithDB(db *gorm.DB, conversationID int64) (Conversation, error) {
+	if conversationID <= 0 {
+		return Conversation{}, ErrConversationNotFound
+	}
+	var conversation Conversation
+	err := db.First(&conversation, conversationID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Conversation{}, ErrConversationNotFound
+	}
+	if err != nil {
+		return Conversation{}, fmt.Errorf("查询会话失败: %w", err)
+	}
+	if conversation.Type != ConversationTypeGroup {
+		return Conversation{}, ErrGroupOnly
+	}
+	return conversation, nil
+}
+
+func ensureActiveMemberWithConversationDB(db *gorm.DB, userID int64, conversationID int64) (ConversationMember, error) {
+	if userID <= 0 || conversationID <= 0 {
+		return ConversationMember{}, ErrInvalidMember
+	}
+	var member ConversationMember
+	err := db.Where("conversation_id = ? AND user_id = ? AND status = ?", conversationID, userID, MemberStatusActive).First(&member).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ConversationMember{}, ErrConversationForbidden
+	}
+	if err != nil {
+		return ConversationMember{}, fmt.Errorf("查询会话成员失败: %w", err)
+	}
+	return member, nil
+}
+
+func findMemberWithDB(db *gorm.DB, conversationID int64, userID int64) (ConversationMember, error) {
+	if conversationID <= 0 || userID <= 0 {
+		return ConversationMember{}, ErrInvalidMember
+	}
+	var member ConversationMember
+	err := db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).First(&member).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ConversationMember{}, ErrInvalidMember
+	}
+	if err != nil {
+		return ConversationMember{}, fmt.Errorf("查询会话成员失败: %w", err)
+	}
+	return member, nil
 }
 
 // ensureUsersExist 检查用户 ID 是否都能在 users 表中找到。

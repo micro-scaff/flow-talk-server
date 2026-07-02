@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "flow-talk-server 接口",
-    "description": "当前服务已实现的用户、认证和会话基础接口。",
+    "description": "当前服务已实现用户认证、会话、消息、WebSocket 实时通信、设备、群管理、消息回执、在线状态和消息搜索接口。",
     "version": "1.0.0"
   },
   "servers": [
@@ -23,12 +23,42 @@
     {
       "name": "会话",
       "description": "单聊、群聊和会话成员接口"
+    },
+    {
+      "name": "消息",
+      "description": "消息发送、历史消息和已读接口"
+    },
+    {
+      "name": "WebSocket",
+      "description": "实时连接、心跳和消息投递协议"
+    },
+    {
+      "name": "设备",
+      "description": "用户设备上报、查询和删除"
+    },
+    {
+      "name": "群管理",
+      "description": "群资料、群成员和角色管理"
+    },
+    {
+      "name": "消息回执",
+      "description": "逐条消息送达和已读回执"
+    },
+    {
+      "name": "在线状态",
+      "description": "本机在线状态查询"
+    },
+    {
+      "name": "消息搜索",
+      "description": "文本消息搜索"
     }
   ],
   "paths": {
     "/api/auth/register": {
       "post": {
-        "tags": ["认证"],
+        "tags": [
+          "认证"
+        ],
         "summary": "注册",
         "description": "创建本地用户，注册成功后直接返回用户信息和登录 token。",
         "operationId": "register",
@@ -88,7 +118,9 @@
     },
     "/api/auth/login": {
       "post": {
-        "tags": ["认证"],
+        "tags": [
+          "认证"
+        ],
         "summary": "登录",
         "description": "使用本地账号密码登录，成功后返回用户信息和新的 token。",
         "operationId": "login",
@@ -149,7 +181,9 @@
     },
     "/api/me": {
       "get": {
-        "tags": ["认证"],
+        "tags": [
+          "认证"
+        ],
         "summary": "获取当前用户",
         "description": "根据请求头中的 token 返回当前登录用户信息。",
         "operationId": "getCurrentUser",
@@ -189,7 +223,9 @@
     },
     "/api/conversations": {
       "get": {
-        "tags": ["会话"],
+        "tags": [
+          "会话"
+        ],
         "summary": "获取会话列表",
         "description": "返回当前用户参与且状态为 active 的会话列表。",
         "operationId": "listConversations",
@@ -220,7 +256,9 @@
     },
     "/api/conversations/{conversation_id}": {
       "get": {
-        "tags": ["会话"],
+        "tags": [
+          "会话"
+        ],
         "summary": "获取会话详情",
         "description": "返回单个会话详情和成员列表，只允许会话 active 成员访问。",
         "operationId": "getConversationDetail",
@@ -267,11 +305,76 @@
             "$ref": "#/components/responses/InternalError"
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "修改群资料",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "会话 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGroupProfileRequest"
+              },
+              "example": {
+                "title": "新的群名称",
+                "avatar_url": ""
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改群资料成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Conversation"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "修改群资料成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
       }
     },
     "/api/conversations/direct": {
       "post": {
-        "tags": ["会话"],
+        "tags": [
+          "会话"
+        ],
         "summary": "创建或获取单聊",
         "description": "根据目标用户创建或获取单聊会话，服务端使用 direct_key 防止重复创建。",
         "operationId": "createDirectConversation",
@@ -318,7 +421,9 @@
     },
     "/api/conversations/groups": {
       "post": {
-        "tags": ["会话"],
+        "tags": [
+          "会话"
+        ],
         "summary": "创建群聊",
         "description": "创建群聊并写入群成员，当前用户自动成为群主。",
         "operationId": "createGroupConversation",
@@ -337,7 +442,10 @@
               "example": {
                 "title": "测试群",
                 "avatar_url": "",
-                "member_ids": [2, 3]
+                "member_ids": [
+                  2,
+                  3
+                ]
               }
             }
           }
@@ -365,9 +473,214 @@
         }
       }
     },
+    "/api/conversations/{conversation_id}/messages": {
+      "post": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "发送消息",
+        "description": "当前用户向指定会话发送消息，服务端写入 messages 并更新会话最后消息。",
+        "operationId": "sendMessage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              },
+              "example": {
+                "client_msg_id": "client-001",
+                "message_type": "text",
+                "content": {
+                  "text": "hello"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "发送成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "获取历史消息",
+        "description": "分页拉取指定会话的历史消息。",
+        "operationId": "listMessages",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "获取成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/conversations/{conversation_id}/read": {
+      "post": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "标记会话已读",
+        "description": "更新当前用户在指定会话中的 last_read_message_id。",
+        "operationId": "markConversationRead",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              },
+              "example": {
+                "last_read_message_id": 1001
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "标记成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadStateApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/admin/users": {
       "get": {
-        "tags": ["用户"],
+        "tags": [
+          "用户"
+        ],
         "summary": "获取用户列表",
         "description": "返回数据库中的所有用户信息。当前接口用于管理和调试。",
         "operationId": "listUsers",
@@ -411,6 +724,1001 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/ws": {
+      "get": {
+        "tags": [
+          "WebSocket"
+        ],
+        "summary": "建立 WebSocket 连接",
+        "description": "地址格式：GET /ws?token={jwt}&device_id={device_id}。事件格式统一为 {type, request_id, payload}，支持 ping、message.send、message.ack、message.deliver、error。",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "JWT token"
+          },
+          {
+            "name": "device_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "设备 ID"
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "协议升级成功"
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/auth/external": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "外部登录",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalLoginRequest"
+              },
+              "example": {
+                "provider": "demo",
+                "access_token": "external-user-001"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthApiResponse"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "登录成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/devices": {
+      "post": {
+        "tags": [
+          "设备"
+        ],
+        "summary": "上报设备",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertDeviceRequest"
+              },
+              "example": {
+                "device_id": "web-001",
+                "platform": "web",
+                "push_token": ""
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "上报设备成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Device"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "上报设备成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "设备"
+        ],
+        "summary": "获取设备列表",
+        "responses": {
+          "200": {
+            "description": "获取设备列表成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Device"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "获取设备列表成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/devices/{device_id}": {
+      "delete": {
+        "tags": [
+          "设备"
+        ],
+        "summary": "删除设备",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除设备成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "删除设备成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/conversations/{conversation_id}/members": {
+      "post": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "添加群成员",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "会话 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMembersRequest"
+              },
+              "example": {
+                "user_ids": [
+                  2,
+                  3
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "添加群成员成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConversationMember"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "添加群成员成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/conversations/{conversation_id}/members/{user_id}": {
+      "delete": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "移除群成员",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "会话 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "description": "用户 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "移除群成员成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "移除群成员成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/conversations/{conversation_id}/leave": {
+      "post": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "退出群聊",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "会话 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "退出群聊成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "退出群聊成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/conversations/{conversation_id}/members/{user_id}/role": {
+      "patch": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "更新成员角色",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "会话 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "description": "用户 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemberRoleRequest"
+              },
+              "example": {
+                "role": "admin"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新成员角色成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ConversationMember"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "更新成员角色成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/messages/search": {
+      "get": {
+        "tags": [
+          "消息搜索"
+        ],
+        "summary": "搜索我的消息",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "搜索消息成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "搜索消息成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/conversations/{conversation_id}/messages/search": {
+      "get": {
+        "tags": [
+          "消息搜索"
+        ],
+        "summary": "搜索会话消息",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "会话 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "搜索消息成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "搜索消息成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/messages/{message_id}/recall": {
+      "patch": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "撤回消息",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "消息 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "撤回消息成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "撤回消息成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/messages/{message_id}/delete": {
+      "patch": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "删除消息",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "消息 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除消息成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "删除消息成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/messages/{message_id}/receipts": {
+      "get": {
+        "tags": [
+          "消息回执"
+        ],
+        "summary": "获取消息回执",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "消息 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "获取消息回执成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MessageReceipt"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "获取消息回执成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/messages/{message_id}/delivered": {
+      "post": {
+        "tags": [
+          "消息回执"
+        ],
+        "summary": "标记消息送达",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "消息 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "标记送达成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "标记送达成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/messages/{message_id}/read": {
+      "post": {
+        "tags": [
+          "消息回执"
+        ],
+        "summary": "标记消息已读",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "消息 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "标记已读成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "标记已读成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/users/{user_id}/presence": {
+      "get": {
+        "tags": [
+          "在线状态"
+        ],
+        "summary": "获取用户在线状态",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "description": "用户 ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "获取在线状态成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Presence"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "获取在线状态成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/users/presence/batch": {
+      "post": {
+        "tags": [
+          "在线状态"
+        ],
+        "summary": "批量获取用户在线状态",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchPresenceRequest"
+              },
+              "example": {
+                "user_ids": [
+                  1,
+                  2
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "获取在线状态成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Presence"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "获取在线状态成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -553,7 +1861,10 @@
     "schemas": {
       "RegisterRequest": {
         "type": "object",
-        "required": ["username", "password"],
+        "required": [
+          "username",
+          "password"
+        ],
         "properties": {
           "username": {
             "type": "string",
@@ -579,7 +1890,10 @@
       },
       "LoginRequest": {
         "type": "object",
-        "required": ["username", "password"],
+        "required": [
+          "username",
+          "password"
+        ],
         "properties": {
           "username": {
             "type": "string",
@@ -700,7 +2014,9 @@
       },
       "CreateDirectConversationRequest": {
         "type": "object",
-        "required": ["target_user_id"],
+        "required": [
+          "target_user_id"
+        ],
         "properties": {
           "target_user_id": {
             "type": "integer",
@@ -712,7 +2028,9 @@
       },
       "CreateGroupConversationRequest": {
         "type": "object",
-        "required": ["title"],
+        "required": [
+          "title"
+        ],
         "properties": {
           "title": {
             "type": "string",
@@ -731,7 +2049,10 @@
               "type": "integer",
               "format": "int64"
             },
-            "example": [2, 3]
+            "example": [
+              2,
+              3
+            ]
           }
         }
       },
@@ -842,6 +2163,14 @@
           "last_message_at": {
             "type": "string",
             "example": ""
+          },
+          "last_message": {
+            "$ref": "#/components/schemas/Message"
+          },
+          "unread_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 3
           }
         }
       },
@@ -896,6 +2225,180 @@
           }
         }
       },
+      "SendMessageRequest": {
+        "type": "object",
+        "required": [
+          "client_msg_id",
+          "message_type",
+          "content"
+        ],
+        "properties": {
+          "client_msg_id": {
+            "type": "string",
+            "description": "客户端生成的消息 ID，用于幂等去重",
+            "example": "client-001"
+          },
+          "message_type": {
+            "type": "string",
+            "description": "消息类型",
+            "enum": [
+              "text",
+              "image",
+              "file"
+            ],
+            "example": "text"
+          },
+          "content": {
+            "type": "object",
+            "description": "消息内容，不同消息类型使用不同结构",
+            "example": {
+              "text": "hello"
+            }
+          }
+        }
+      },
+      "MarkReadRequest": {
+        "type": "object",
+        "required": [
+          "last_read_message_id"
+        ],
+        "properties": {
+          "last_read_message_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001
+          },
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          },
+          "sender_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          },
+          "client_msg_id": {
+            "type": "string",
+            "example": "client-001"
+          },
+          "message_type": {
+            "type": "string",
+            "example": "text"
+          },
+          "content": {
+            "type": "object",
+            "example": {
+              "text": "hello"
+            }
+          },
+          "status": {
+            "type": "string",
+            "example": "normal"
+          },
+          "sent_at": {
+            "type": "string",
+            "example": "2026-06-29T12:00:00+08:00"
+          }
+        }
+      },
+      "MessagePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "next_before_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1000
+          },
+          "has_more": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "ReadState": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          },
+          "last_read_message_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001
+          },
+          "last_read_at": {
+            "type": "string",
+            "example": "2026-06-29T12:05:00+08:00"
+          }
+        }
+      },
+      "MessageApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/Message"
+          },
+          "message": {
+            "type": "string",
+            "example": "发送消息成功"
+          }
+        }
+      },
+      "MessagePageApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/MessagePage"
+          },
+          "message": {
+            "type": "string",
+            "example": "获取历史消息成功"
+          }
+        }
+      },
+      "ReadStateApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/ReadState"
+          },
+          "message": {
+            "type": "string",
+            "example": "标记已读成功"
+          }
+        }
+      },
       "ErrorApiResponse": {
         "type": "object",
         "properties": {
@@ -911,6 +2414,204 @@
             "type": "string",
             "description": "接口信息或错误信息",
             "example": "参数校验失败"
+          }
+        }
+      },
+      "ExternalLoginRequest": {
+        "type": "object",
+        "required": [
+          "provider",
+          "access_token"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "example": "demo"
+          },
+          "access_token": {
+            "type": "string",
+            "example": "external-user-001"
+          }
+        }
+      },
+      "UpsertDeviceRequest": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "platform"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "example": "web-001"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "web",
+              "ios",
+              "android",
+              "desktop"
+            ],
+            "example": "web"
+          },
+          "push_token": {
+            "type": "string",
+            "example": "push-token"
+          }
+        }
+      },
+      "Device": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          },
+          "device_id": {
+            "type": "string",
+            "example": "web-001"
+          },
+          "platform": {
+            "type": "string",
+            "example": "web"
+          },
+          "push_token": {
+            "type": "string",
+            "example": "push-token"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "example": "2026-06-29T12:00:00+08:00"
+          }
+        }
+      },
+      "AddMembersRequest": {
+        "type": "object",
+        "required": [
+          "user_ids"
+        ],
+        "properties": {
+          "user_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": [
+              2,
+              3
+            ]
+          }
+        }
+      },
+      "UpdateMemberRoleRequest": {
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "example": "admin"
+          }
+        }
+      },
+      "UpdateGroupProfileRequest": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "example": "新的群名称"
+          },
+          "avatar_url": {
+            "type": "string",
+            "example": "https://example.com/group.png"
+          }
+        }
+      },
+      "Presence": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          },
+          "online": {
+            "type": "boolean",
+            "example": true
+          },
+          "connection_count": {
+            "type": "integer",
+            "example": 2
+          },
+          "last_active_at": {
+            "type": "string",
+            "example": "2026-06-29T12:00:00+08:00"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "example": "2026-06-29T12:00:00+08:00"
+          }
+        }
+      },
+      "BatchPresenceRequest": {
+        "type": "object",
+        "required": [
+          "user_ids"
+        ],
+        "properties": {
+          "user_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "MessageReceipt": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 2
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "delivered",
+              "read"
+            ],
+            "example": "read"
+          },
+          "updated_at": {
+            "type": "string",
+            "example": "2026-06-29T12:00:00+08:00"
           }
         }
       }
