@@ -50,17 +50,74 @@ secret = dev-secret
 ttl = 24h
 ```
 
-启动服务：
+### Makefile 的作用
 
-```bash
-go run .
+项目根目录提供了 `Makefile`，用于统一本地开发常用命令，并确保 Go 编译缓存写入当前项目目录 `.gocache/`。
+
+```text
+make run        普通方式启动服务，内部执行 GOCACHE=./.gocache go run .
+make fresh      热重载方式启动服务，内部执行 GOCACHE=./.gocache $(go env GOPATH)/bin/fresh
+make test       编译检查和测试，内部执行 GOCACHE=./.gocache go test ./...
+make vet        静态检查，内部执行 GOCACHE=./.gocache go vet ./...
+make cache-env  把 Go 默认 GOCACHE 设置为当前项目的 .gocache
 ```
 
-使用 fresh 热重载启动：
+### 普通启动
+
+不需要热重载时使用：
+
+```bash
+make run
+```
+
+等价于：
+
+```bash
+GOCACHE=$(pwd)/.gocache go run .
+```
+
+### fresh 热重载启动
+
+当前项目推荐使用 fresh 热重载开发。先安装 fresh：
 
 ```bash
 go install github.com/pilu/fresh@latest
-fresh
+```
+
+之后启动项目：
+
+```bash
+make fresh
+```
+
+`make fresh` 会调用：
+
+```bash
+GOCACHE=$(pwd)/.gocache $(go env GOPATH)/bin/fresh
+```
+
+如果不使用 Makefile，也可以直接执行：
+
+```bash
+GOCACHE=$(pwd)/.gocache $(go env GOPATH)/bin/fresh
+```
+
+fresh 热重载临时文件放在当前项目目录：
+
+```text
+tmp/
+```
+
+Go 编译缓存默认放到当前项目目录：
+
+```text
+.gocache/
+```
+
+如果希望直接执行 `go run .`、`go test ./...` 时也使用项目内缓存，先执行一次：
+
+```bash
+make cache-env
 ```
 
 当前可调用接口：
