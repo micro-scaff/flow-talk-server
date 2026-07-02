@@ -15,6 +15,7 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	// AuthController 需要 JWT 配置来签发 token，UserController 暂时没有额外依赖。
 	authController := controllers.AuthController{JWT: cfg.JWT}
 	userController := controllers.UserController{}
+	conversationController := controllers.ConversationController{}
 
 	// /api 放面向客户端的通用接口。
 	api := engine.Group("/api")
@@ -29,6 +30,15 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 
 		// /api/me 需要 token，用来检查当前登录态是否有效并返回当前用户信息。
 		api.GET("/me", middlewares.AuthRequired(cfg.JWT), authController.Me)
+
+		// /api/conversations 下放当前登录用户的会话相关接口。
+		conversations := api.Group("/conversations", middlewares.AuthRequired(cfg.JWT))
+		{
+			conversations.GET("", conversationController.Index)
+			conversations.GET("/:conversation_id", conversationController.Show)
+			conversations.POST("/direct", conversationController.CreateDirect)
+			conversations.POST("/groups", conversationController.CreateGroup)
+		}
 	}
 
 	// /admin 放后台或调试接口。
