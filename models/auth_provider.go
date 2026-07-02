@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// ErrUnsupportedAuthProvider 表示客户端传入的 provider 当前没有对应校验器。
 var ErrUnsupportedAuthProvider = errors.New("不支持的外部身份提供方")
 
 // ExternalUserProfile 是外部身份系统返回给 IM 服务的用户资料。
@@ -33,12 +34,16 @@ type AuthProvider struct {
 type DemoTokenVerifier struct{}
 
 func (DemoTokenVerifier) Verify(accessToken string) (ExternalUserProfile, error) {
+	// demo provider 只用于本地开发联调，不访问真实第三方系统。
+	// 真实 provider 应在这里调用外部服务校验 access_token，并返回可信的 external_id。
 	accessToken = strings.TrimSpace(accessToken)
 	if accessToken == "" {
 		return ExternalUserProfile{}, ErrValidation
 	}
 
+	// external_id 加 provider 前缀，避免多个身份源出现相同用户 ID 时互相冲突。
 	externalID := "demo:" + accessToken
+	// username 需要落到 users.username 唯一列，因此把不适合作账号展示的字符替换掉。
 	username := "demo_" + strings.NewReplacer(":", "_", " ", "_", "@", "_").Replace(accessToken)
 	return ExternalUserProfile{
 		ExternalID: externalID,
@@ -48,6 +53,8 @@ func (DemoTokenVerifier) Verify(accessToken string) (ExternalUserProfile, error)
 }
 
 func verifierForProvider(provider string) (TokenVerifier, error) {
+	// provider 路由集中放在这里。
+	// 后续新增企业微信、OAuth、内部网关等 provider 时，只扩展这个 switch 或替换成注册表即可。
 	switch strings.TrimSpace(provider) {
 	case "demo":
 		return DemoTokenVerifier{}, nil

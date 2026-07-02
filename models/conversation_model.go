@@ -357,16 +357,19 @@ func AddGroupMembers(operatorID int64, conversationID int64, userIDs []int64) ([
 	if len(userIDs) == 0 {
 		return nil, ErrInvalidMember
 	}
+	// 去掉重复和非法 ID，保证数据库写入顺序稳定，也避免重复返回同一个成员。
 	userIDs = uniquePositiveIDs(userIDs)
 	if len(userIDs) == 0 {
 		return nil, ErrInvalidMember
 	}
+	// 当前建表没有外键，新增成员前必须显式确认用户存在。
 	if err := ensureUsersExist(userIDs); err != nil {
 		return nil, err
 	}
 
 	var result []ConversationMemberDTO
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		// 群管理只支持 group 会话，不能把单聊当作可维护成员列表的群。
 		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
 			return err
 		}
@@ -380,6 +383,8 @@ func AddGroupMembers(operatorID int64, conversationID int64, userIDs []int64) ([
 
 		members := make([]ConversationMember, 0, len(userIDs))
 		for _, userID := range userIDs {
+			// 已经存在成员记录时复用旧记录。
+			// 这样 left/removed 成员可以重新激活，同时保留同一个唯一键记录。
 			member, err := findMemberWithDB(tx, conversationID, userID)
 			if errors.Is(err, ErrInvalidMember) {
 				member = ConversationMember{
@@ -398,6 +403,7 @@ func AddGroupMembers(operatorID int64, conversationID int64, userIDs []int64) ([
 				return err
 			}
 			if member.Status != MemberStatusActive {
+				// 重新加入时恢复为普通成员，避免被移除前的管理员角色意外保留。
 				if err := tx.Model(&member).Updates(map[string]any{
 					"role":      MemberRoleMember,
 					"status":    MemberStatusActive,
@@ -428,6 +434,7 @@ func RemoveGroupMember(operatorID int64, conversationID int64, targetUserID int6
 		return ErrInvalidMember
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		// 所有读取和更新放在同一个事务里，避免权限判断和状态更新之间发生明显竞态。
 		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
 			return err
 		}
@@ -442,6 +449,7 @@ func RemoveGroupMember(operatorID int64, conversationID int64, targetUserID int6
 		if target.Role == MemberRoleOwner {
 			return ErrCannotRemoveOwner
 		}
+		// owner 可以移除 admin/member；admin 只能移除 member；member 没有移除权限。
 		if !CanManageGroupMember(operator, target) {
 			return ErrPermissionDenied
 		}
@@ -465,6 +473,7 @@ func LeaveGroup(userID int64, conversationID int64) error {
 		if member.Role == MemberRoleOwner {
 			return ErrOwnerCannotLeave
 		}
+		// 主动退出和被管理员移除区分不同状态，便于后续审计或展示不同提示。
 		return tx.Model(&member).Update("status", MemberStatusLeft).Error
 	})
 	if err != nil {
@@ -475,6 +484,8 @@ func LeaveGroup(userID int64, conversationID int64) error {
 
 func UpdateMemberRole(operatorID int64, conversationID int64, targetUserID int64, role string) (ConversationMemberDTO, error) {
 	role = strings.TrimSpace(role)
+	// 当前接口只允许 owner 在 admin/member 之间切换。
+	// owner 转让需要额外处理 conversations.owner_id，所以不在这里做。
 	if role != MemberRoleAdmin && role != MemberRoleMember {
 		return ConversationMemberDTO{}, ErrInvalidMemberRole
 	}
@@ -498,6 +509,7 @@ func UpdateMemberRole(operatorID int64, conversationID int64, targetUserID int64
 		if target.Role == MemberRoleOwner {
 			return ErrInvalidMemberRole
 		}
+		// 只更新 role，不改 status；被移除/退出成员前面已经被 active 校验拦截。
 		if err := tx.Model(&target).Update("role", role).Error; err != nil {
 			return err
 		}
@@ -512,6 +524,7 @@ func UpdateMemberRole(operatorID int64, conversationID int64, targetUserID int64
 }
 
 func UpdateGroupProfile(operatorID int64, conversationID int64, title string, avatarURL string) (ConversationDTO, error) {
+	// 群名称是展示和搜索的重要字段，不允许空白字符串。
 	title = strings.TrimSpace(title)
 	avatarURL = strings.TrimSpace(avatarURL)
 	if title == "" {
@@ -531,6 +544,7 @@ func UpdateGroupProfile(operatorID int64, conversationID int64, title string, av
 		if operator.Role != MemberRoleOwner && operator.Role != MemberRoleAdmin {
 			return ErrPermissionDenied
 		}
+		// avatarURL 为空时写 NULL，和创建群聊时的可选字段语义保持一致。
 		if err := tx.Model(&found).Updates(map[string]any{
 			"title":      optionalString(title),
 			"avatar_url": optionalString(avatarURL),

@@ -254,18 +254,22 @@ func FindMessageByID(messageID int64) (Message, error) {
 // RecallMessage 撤回消息。
 // 发送者可以撤回自己的消息；群主和管理员可以撤回群内其他成员消息。
 func RecallMessage(operatorID int64, messageID int64) (MessageDTO, error) {
+	// 这里只传入目标状态，统一的权限和状态校验放在 updateMessageStatus。
 	return updateMessageStatus(operatorID, messageID, MessageStatusRecalled)
 }
 
 // DeleteMessage 删除消息。
 // 当前版本的 deleted 是全局状态：被删除后不会再出现在历史消息列表中。
 func DeleteMessage(operatorID int64, messageID int64) (MessageDTO, error) {
+	// 删除和撤回使用同一套权限矩阵：本人可操作自己的消息，群主/管理员可操作群内消息。
 	return updateMessageStatus(operatorID, messageID, MessageStatusDeleted)
 }
 
 // CanManageMessage 判断用户是否可以管理某条消息。
 // 这里不区分撤回和删除的权限矩阵，二者都遵循 v6 文档中的同一套规则。
 func CanManageMessage(operatorID int64, message Message) (bool, error) {
+	// 先确认操作者仍在消息所属会话中。
+	// 如果已经退出或被移除，即使曾经发送过消息，也不能再管理当前会话内容。
 	member, err := EnsureActiveMember(operatorID, message.ConversationID)
 	if err != nil {
 		if errors.Is(err, ErrConversationForbidden) {
@@ -276,6 +280,8 @@ func CanManageMessage(operatorID int64, message Message) (bool, error) {
 	if message.SenderID == operatorID {
 		return true, nil
 	}
+	// v6 权限矩阵规定 owner/admin 可以撤回或删除他人消息。
+	// 单聊成员没有 owner/admin 角色，因此只能管理自己的消息。
 	if member.Role == MemberRoleOwner || member.Role == MemberRoleAdmin {
 		return true, nil
 	}
@@ -300,14 +306,17 @@ func updateMessageStatus(operatorID int64, messageID int64, status string) (Mess
 
 	var saved Message
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		// 先在事务内读取消息，保证后续状态更新基于同一条记录。
 		message, err := findMessageByIDWithDB(tx, messageID)
 		if err != nil {
 			return err
 		}
+		// deleted 是终态，避免已经从历史列表隐藏的消息再被撤回或重复删除。
 		if message.Status == MessageStatusDeleted {
 			return ErrInvalidMessageStatus
 		}
 
+		// 权限检查使用统一入口，避免 Recall/Delete 分别维护两套规则。
 		canManage, err := CanManageMessage(operatorID, message)
 		if err != nil {
 			return err
@@ -316,6 +325,8 @@ func updateMessageStatus(operatorID int64, messageID int64, status string) (Mess
 			return ErrMessageForbidden
 		}
 
+		// 这里只更新 status，不改 content。
+		// DTO 输出 recalled 时会把 content 置空，保留数据库原文便于审计或后续扩展。
 		if err := tx.Model(&message).Update("status", status).Error; err != nil {
 			return err
 		}

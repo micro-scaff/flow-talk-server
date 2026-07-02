@@ -51,6 +51,10 @@
     {
       "name": "消息搜索",
       "description": "文本消息搜索"
+    },
+    {
+      "name": "资源",
+      "description": "图片、视频等静态资源上传"
     }
   ],
   "paths": {
@@ -73,7 +77,7 @@
                 "username": "alice",
                 "password": "123456",
                 "nickname": "Alice",
-                "avatar_url": "https://example.com/avatar.png"
+                "avatar_base64": "data:image/png;base64,iVBORw0KGgo="
               }
             }
           }
@@ -1725,6 +1729,78 @@
           }
         }
       }
+    },
+    "/api/resources/upload": {
+      "post": {
+        "tags": [
+          "资源"
+        ],
+        "summary": "上传图片或视频资源",
+        "description": "需要登录。图片保存到 static/images/{user_id}/{timestamp}.{ext}，视频保存到 static/videos/{user_id}/{timestamp}.{ext}。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "type"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "上传文件"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "image",
+                      "video"
+                    ],
+                    "description": "资源类型"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "上传资源成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Resource"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "上传资源成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1881,10 +1957,10 @@
             "description": "展示昵称，不传时默认使用 username",
             "example": "Alice"
           },
-          "avatar_url": {
+          "avatar_base64": {
             "type": "string",
-            "description": "头像地址",
-            "example": "https://example.com/avatar.png"
+            "description": "头像 base64 字符串，可传 data URL 或纯 base64",
+            "example": "data:image/png;base64,iVBORw0KGgo="
           }
         }
       },
@@ -2612,6 +2688,23 @@
           "updated_at": {
             "type": "string",
             "example": "2026-06-29T12:00:00+08:00"
+          }
+        }
+      },
+      "Resource": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video"
+            ],
+            "example": "image"
+          },
+          "url": {
+            "type": "string",
+            "example": "/static/images/1/1780000000000.png"
           }
         }
       }

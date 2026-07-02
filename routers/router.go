@@ -22,6 +22,7 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	deviceController := controllers.DeviceController{}
 	receiptController := controllers.MessageReceiptController{}
 	searchController := controllers.MessageSearchController{}
+	resourceController := controllers.ResourceController{}
 
 	// Hub 是当前进程内的 WebSocket 连接管理器。
 	// v4-v7 都围绕它实现单机实时投递和本机在线状态查询。
@@ -85,6 +86,11 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		{
 			users.GET("/:user_id/presence", presenceController.Show)
 			users.POST("/presence/batch", presenceController.Batch)
+		}
+
+		resources := api.Group("/resources", middlewares.AuthRequired(cfg.JWT))
+		{
+			resources.POST("/upload", resourceController.Upload)
 		}
 	}
 

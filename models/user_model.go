@@ -46,7 +46,7 @@ type User struct {
 	Password string `gorm:"column:password" json:"-"`
 	// Nickname 是 IM 展示昵称；注册未传时默认使用 username。
 	Nickname string `gorm:"column:nickname" json:"nickname"`
-	// AvatarURL 是头像地址，空值写入 NULL。
+	// AvatarURL 沿用数据库字段名；本地注册用户保存头像 base64，外部用户仍可保存头像 URL。
 	AvatarURL *string `gorm:"column:avatar_url" json:"avatar_url,omitempty"`
 	// AuthSource 标记用户来源：local 表示本地注册，external 预留给外部系统。
 	AuthSource string `gorm:"column:auth_source" json:"auth_source"`
@@ -88,11 +88,14 @@ func (u User) ToDTO() UserDTO {
 
 // CreateLocalUser 创建本地注册用户。
 // 当前阶段为了先跑通接口仍保存明文密码，后续应该替换为 password_hash。
-func CreateLocalUser(username string, password string, nickname string, avatarURL string) (User, error) {
-	// 用户名、昵称、头像地址都去掉首尾空格，避免 "alice" 和 " alice " 被当成不同账号。
+func CreateLocalUser(username string, password string, nickname string, avatarBase64 string) (User, error) {
+	// 用户名、昵称、头像 base64 都去掉首尾空格，避免 "alice" 和 " alice " 被当成不同账号。
 	username = strings.TrimSpace(username)
 	nickname = strings.TrimSpace(nickname)
-	avatarURL = strings.TrimSpace(avatarURL)
+	avatarBase64, err := NormalizeAvatarBase64(avatarBase64)
+	if err != nil {
+		return User{}, err
+	}
 	// 注册最少需要 username/password；nickname 可以不传。
 	if username == "" || password == "" {
 		return User{}, ErrValidation
@@ -108,7 +111,7 @@ func CreateLocalUser(username string, password string, nickname string, avatarUR
 		Username:   username,
 		Password:   password,
 		Nickname:   nickname,
-		AvatarURL:  optionalString(avatarURL),
+		AvatarURL:  optionalString(avatarBase64),
 		AuthSource: AuthSourceLocal,
 		Status:     UserStatusEnabled,
 	}

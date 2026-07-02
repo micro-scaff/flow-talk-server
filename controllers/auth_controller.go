@@ -24,8 +24,9 @@ type RegisterRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 	// Nickname 不传时 model 层会默认使用 username。
-	Nickname  string `json:"nickname"`
-	AvatarURL string `json:"avatar_url"`
+	Nickname string `json:"nickname"`
+	// AvatarBase64 按资源文档要求直接保存 base64，不再通过注册接口上传头像文件。
+	AvatarBase64 string `json:"avatar_base64"`
 }
 
 // LoginRequest 是登录接口的 JSON 入参。
@@ -44,7 +45,7 @@ func (ctl AuthController) Register(c *gin.Context) {
 	}
 
 	// controller 不直接写 SQL，把用户创建交给 models 层，保持 MVC 分工清楚。
-	user, err := models.CreateLocalUser(req.Username, req.Password, req.Nickname, req.AvatarURL)
+	user, err := models.CreateLocalUser(req.Username, req.Password, req.Nickname, req.AvatarBase64)
 	if err != nil {
 		writeModelError(c, err)
 		return
@@ -104,6 +105,8 @@ func writeModelError(c *gin.Context, err error) {
 		responses.Error(c, http.StatusConflict, "用户名已存在")
 	case errors.Is(err, models.ErrValidation):
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
+	case errors.Is(err, models.ErrInvalidAvatarBase64):
+		responses.Error(c, http.StatusBadRequest, "头像 base64 不合法")
 	case errors.Is(err, models.ErrInvalidCredentials):
 		responses.Error(c, http.StatusUnauthorized, "账号或密码错误")
 	case errors.Is(err, models.ErrUserDisabled):

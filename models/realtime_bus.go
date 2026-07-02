@@ -27,10 +27,13 @@ func NewMemoryRealtimeBus() *MemoryRealtimeBus {
 }
 
 func (b *MemoryRealtimeBus) PublishMessageDeliver(event MessageDeliverEvent) error {
+	// 先复制 handler 列表再调用，避免 handler 内部再次订阅时造成锁重入或长时间持锁。
 	b.mu.RLock()
 	handlers := append([]func(MessageDeliverEvent){}, b.handlers...)
 	b.mu.RUnlock()
 
+	// 内存实现同步执行 handler，便于本地调试。
+	// Redis 实现可以改成异步消费，但对外仍保持同一个接口。
 	for _, handler := range handlers {
 		handler(event)
 	}
@@ -38,6 +41,7 @@ func (b *MemoryRealtimeBus) PublishMessageDeliver(event MessageDeliverEvent) err
 }
 
 func (b *MemoryRealtimeBus) SubscribeMessageDeliver(handler func(MessageDeliverEvent)) error {
+	// nil handler 没有业务意义，直接忽略，调用方不需要额外判空。
 	if handler == nil {
 		return nil
 	}

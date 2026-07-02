@@ -16,7 +16,10 @@ func GetUserPresence(hub *WSHub, userID int64) (PresenceDTO, error) {
 		return PresenceDTO{}, ErrInvalidMember
 	}
 
+	// 在线状态优先取 Hub 的本机连接快照。
+	// 这是实时值，但只代表当前进程；多实例部署时应由 Redis presence 或 RealtimeBus 聚合。
 	presence := hub.LocalPresence(userID)
+	// last_seen_at 来自设备表，即使用户当前离线，也能给客户端展示最近活跃时间。
 	seenAt, err := LatestDeviceSeenAt(userID)
 	if err != nil {
 		return PresenceDTO{}, err
@@ -27,11 +30,14 @@ func GetUserPresence(hub *WSHub, userID int64) (PresenceDTO, error) {
 
 // BatchUserPresence 批量查询用户在线状态。
 func BatchUserPresence(hub *WSHub, userIDs []int64) ([]PresenceDTO, error) {
+	// 去重和排序放在 model 层，保证不同 controller/调用方拿到一致的结果顺序。
 	userIDs = uniquePositiveIDs(userIDs)
 	if len(userIDs) == 0 {
 		return nil, ErrInvalidMember
 	}
 
+	// 当前数据量较小，逐个查询可读性更好。
+	// 后续如果需要大批量在线状态，可以把 LatestDeviceSeenAt 改成批量 SQL。
 	result := make([]PresenceDTO, 0, len(userIDs))
 	for _, userID := range userIDs {
 		presence, err := GetUserPresence(hub, userID)

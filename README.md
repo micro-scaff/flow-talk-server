@@ -68,6 +68,7 @@ fresh
 ```text
 POST /api/auth/register
 POST /api/auth/login
+POST /api/resources/upload
 GET  /api/me
 GET  /admin/users
 ```
@@ -78,6 +79,7 @@ GET  /admin/users
 - 预留后续接入外部登录系统的身份适配能力
 - WebSocket 长连接实时收发消息
 - HTTP 接口管理登录注册、会话、历史消息、群聊
+- 支持图片、视频资源上传到 `static` 目录
 - 单聊与群聊统一建模
 - MySQL 持久化消息、会话、成员关系
 - 支持离线消息、会话级未读数
@@ -129,7 +131,7 @@ CREATE TABLE users (
   username VARCHAR(64) NOT NULL,
   password VARCHAR(255) NULL,
   nickname VARCHAR(64) NOT NULL,
-  avatar_url VARCHAR(255) NULL,
+  avatar_url LONGTEXT NULL,
   auth_source ENUM('local', 'external') NOT NULL DEFAULT 'local',
   status TINYINT NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -145,7 +147,7 @@ CREATE TABLE users (
 - `username`：本地登录账号；外部用户接入后可使用外部账号名或生成稳定用户名
 - `password`：本地用户明文密码；外部用户可为空
 - `nickname`：IM 展示昵称，可本地设置或由外部系统同步
-- `avatar_url` 用户头像
+- `avatar_url` 用户头像；本地注册用户保存 base64，外部用户可保存头像 URL
 - `auth_source`：用户来源，`local` 表示本地注册，`external` 表示外部系统同步
 - `status`：用户状态，第一版可用 `1` 表示正常，`0` 表示禁用
 
@@ -334,6 +336,7 @@ POST /api/auth/login
 ```
 
 注册成功后创建 `users` 记录。登录成功后返回 JWT，后续 HTTP 和 WebSocket 请求都携带该 token。
+注册头像通过 `avatar_base64` 传入，服务端直接保存到 `users.avatar_url`。
 
 ### 会话接口
 
@@ -442,7 +445,7 @@ GET /ws?token={jwt}&device_id={device_id}
 - `client_msg_id` 必须由客户端生成，服务端用 `(sender_id, client_msg_id)` 保证重试幂等。
 - 未读数第一版可以实时查询计算；如果数据量变大，再引入缓存或冗余计数字段。
 - WebSocket 在线连接第一版可以只保存在单进程内存中；多实例部署时再引入 Redis 或消息队列。
-- 文件和图片消息第一版只保存 URL，不负责文件上传存储；文件服务可独立建设。
+- 图片和视频资源通过 `POST /api/resources/upload` 上传，返回 `/static/...` URL 后可写入消息 `content`。
 
 ## 典型流程
 
