@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 
+	"flow-talk/middlewares"
 	"flow-talk/models"
 	"flow-talk/routers"
 
@@ -50,6 +51,8 @@ func main() {
 	if err := engine.SetTrustedProxies(nil); err != nil {
 		log.Fatalf("设置 Gin trusted proxies 失败: %v", err)
 	}
+	// 必须在业务路由之前注册 CORS 中间件，才能处理浏览器发出的 OPTIONS 预检请求。
+	engine.Use(middlewares.CORS())
 
 	// 暴露 static 目录，后续上传文件、图片、前端静态资源都可以先放这里。
 	engine.Static("/static", "./static")
