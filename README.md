@@ -1,36 +1,47 @@
 # flow-talk-server
 
-流言：一个基于 Gin + GORM + MySQL 的即时通讯服务。
+流言后端服务，基于 Gin + GORM + MySQL 实现即时通讯能力。
 
-## 项目目录
+项目的业务目标、设计选择、数据模型和版本规划已经迁移到 [docs/OVERVIEW.md](./docs/OVERVIEW.md)。README 只保留本地开发最常用的信息。
+
+## 目录结构
 
 ```text
 flow-talk-server
 ├─ conf
-│  └─ app.ini                  本地配置文件，保存 MySQL、HTTP、JWT 配置
-├─ controllers
-│  ├─ auth_controller.go       注册、登录、当前用户接口
-│  └─ user_controller.go       获取数据库中的所有 user 信息
-├─ middlewares
-│  └─ auth.go                  Gin JWT 鉴权中间件
-├─ models
-│  ├─ database.go              读取配置、连接 GORM/MySQL、管理数据库连接
-│  └─ user_model.go            users 表映射和用户查询/注册/登录方法
+│  └─ app.ini                  本地开发配置，包含 MySQL、HTTP、JWT
+├─ controllers                 HTTP/WebSocket 接口控制层
+├─ middlewares                 Gin 中间件，例如鉴权、CORS
+├─ models                      配置、数据库模型、业务模型、WebSocket Hub
+├─ responses                   统一响应结构
 ├─ routers
-│  └─ router.go                Gin 路由注册
-├─ static                      静态资源目录
+│  └─ router.go                路由注册
+├─ static                      上传资源和静态资源目录
+├─ docs                        项目说明、接口文档、数据库文档
+│  ├─ OVERVIEW.md              项目介绍和整体设计
+│  ├─ openapi.json             OpenAPI 接口描述
+│  └─ 数据库                   建表和数据库落地文档
 ├─ runner.conf                 fresh 热重载配置
+├─ Makefile                    本地开发常用命令
 ├─ go.mod
 └─ main.go                     服务入口
 ```
 
-## 第一版目标
+## 环境要求
 
-第一版实现一个群聊基础版 IM 服务，覆盖完整的即时通讯主流程，同时为后续扩展预留接口。
+- Go：项目 `go.mod` 当前要求 `go 1.25.4`
+- MySQL：本地默认连接 `127.0.0.1:3306`
+- fresh：可选，仅热重载开发时需要
 
-## 本地启动
+如果本机 Go 版本低于项目要求，Go 会尝试自动下载对应 toolchain。若遇到 `toolchain not available`，可以直接安装 Go 1.25.4，或切换到支持 toolchain 下载的代理：
 
-服务默认读取项目根目录的 `conf/app.ini`。当前本地配置如下：
+```bash
+go env -w GOPROXY=https://proxy.golang.org,direct
+```
+
+## 本地配置
+
+服务启动时默认读取 `conf/app.ini`：
 
 ```ini
 [mysql]
@@ -50,21 +61,35 @@ secret = dev-secret
 ttl = 24h
 ```
 
-### Makefile 的作用
+启动前需要先创建数据库：
 
-项目根目录提供了 `Makefile`，用于统一本地开发常用命令，并确保 Go 编译缓存写入当前项目目录 `.gocache/`。
-
-```text
-make run        普通方式启动服务，内部执行 GOCACHE=./.gocache go run .
-make fresh      热重载方式启动服务，内部执行 GOCACHE=./.gocache $(go env GOPATH)/bin/fresh
-make test       编译检查和测试，内部执行 GOCACHE=./.gocache go test ./...
-make vet        静态检查，内部执行 GOCACHE=./.gocache go vet ./...
-make cache-env  把 Go 默认 GOCACHE 设置为当前项目的 .gocache
+```sql
+CREATE DATABASE flow_talk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 普通启动
+建表文档在 [docs/数据库](./docs/数据库)。
 
-不需要热重载时使用：
+## 安装依赖
+
+```bash
+go mod tidy
+```
+
+热重载开发需要额外安装 fresh：
+
+```bash
+go install github.com/pilu/fresh@v0.0.0-20240621171608-8d1fef547a99
+```
+
+安装后确认可执行文件存在：
+
+```bash
+test -x "$(go env GOPATH)/bin/fresh"
+```
+
+## 启动项目
+
+普通启动：
 
 ```bash
 make run
@@ -76,483 +101,83 @@ make run
 GOCACHE=$(pwd)/.gocache go run .
 ```
 
-### fresh 热重载启动
-
-当前项目推荐使用 fresh 热重载开发。先安装 fresh：
-
-```bash
-go install github.com/pilu/fresh@latest
-```
-
-之后启动项目：
+热重载启动：
 
 ```bash
 make fresh
 ```
 
-`make fresh` 会调用：
-
-```bash
-GOCACHE=$(pwd)/.gocache $(go env GOPATH)/bin/fresh
-```
-
-如果不使用 Makefile，也可以直接执行：
-
-```bash
-GOCACHE=$(pwd)/.gocache $(go env GOPATH)/bin/fresh
-```
-
-fresh 热重载临时文件放在当前项目目录：
+服务默认监听：
 
 ```text
-tmp/
+http://localhost:8080
 ```
 
-Go 编译缓存默认放到当前项目目录：
+WebSocket 入口：
 
 ```text
-.gocache/
+ws://localhost:8080/ws
 ```
 
-如果希望直接执行 `go run .`、`go test ./...` 时也使用项目内缓存，先执行一次：
+## 常用命令
 
-```bash
-make cache-env
+```text
+make run        普通方式启动服务
+make fresh      使用 fresh 热重载启动服务
+make test       运行测试和编译检查
+make vet        运行 Go 静态检查
+make cache-env  将 Go 默认 GOCACHE 设置到当前项目的 .gocache
 ```
 
-当前可调用接口：
+`Makefile` 会把 Go 编译缓存写入项目内的 `.gocache/`，fresh 的临时构建文件写入 `tmp/`。
+
+## 接口入口
+
+常用接口：
 
 ```text
 POST /api/auth/register
 POST /api/auth/login
-POST /api/resources/upload
+POST /api/auth/external
 GET  /api/me
-GET  /admin/users
-```
-
-核心能力：
-
-- 当前阶段提供内置用户注册、登录、JWT 鉴权
-- 预留后续接入外部登录系统的身份适配能力
-- WebSocket 长连接实时收发消息
-- HTTP 接口管理登录注册、会话、历史消息、群聊
-- 支持图片、视频资源上传到 `static` 目录
-- 单聊与群聊统一建模
-- MySQL 持久化消息、会话、成员关系
-- 支持离线消息、会话级未读数
-- 预留移动端离线推送设备信息
-
-## 设计选择
-
-### 用户体系
-
-当前阶段保留内置用户系统，由 IM 服务提供注册、登录和 JWT 鉴权。这样服务可以独立运行，前端或测试客户端不依赖外部登录系统也能完成完整 IM 流程。
-
-同时，用户体系需要预留后续接入外部登录系统的能力。业务层不直接依赖账号密码登录细节，而是通过鉴权抽象获取当前用户：
-
-- `AuthProvider`：负责本地登录、外部登录态校验、用户资料同步等能力
-- `TokenVerifier`：负责校验当前请求携带的 token，并解析当前用户身份
-- `UserSyncer`：负责把外部用户资料同步到 IM 的 `users` 表
-
-后续接入外部登录系统时，只需要替换或新增 `AuthProvider` 实现，并通过 `external_id` 绑定外部用户，不影响 IM 消息、会话、群聊主流程。
-
-### 实时通信
-
-第一版采用 WebSocket 为主：
-
-- WebSocket：实时收发消息、在线通知、心跳
-- HTTP：登录注册、会话列表、历史消息、群管理、设备信息上报
-
-同时预留推送通道，后续可接入 APNs、FCM 或厂商推送。第一版在线用户通过 WebSocket 投递，离线用户只保存消息和设备信息。
-
-### 数据模型
-
-采用统一会话模型：
-
-- 单聊和群聊都属于 `conversations`
-- 消息统一存储在 `messages`
-- 成员、未读数、已读游标通过 `conversation_members` 管理
-
-这种方式避免单聊和群聊写两套逻辑，后续扩展会话列表、多端同步、历史消息和消息搜索更简单。
-
-## MySQL 表设计
-
-### users
-
-用户表。当前阶段支持本地注册登录，同时预留外部登录系统用户映射。
-
-```sql
-CREATE TABLE users (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  external_id VARCHAR(128) NULL,
-  username VARCHAR(64) NOT NULL,
-  password VARCHAR(255) NULL,
-  nickname VARCHAR(64) NOT NULL,
-  avatar_url LONGTEXT NULL,
-  auth_source ENUM('local', 'external') NOT NULL DEFAULT 'local',
-  status TINYINT NOT NULL DEFAULT 1,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_users_username (username),
-  UNIQUE KEY uk_users_external_id (external_id)
-);
-```
-
-字段说明：
-
-- `external_id`：外部登录系统中的用户 ID，本地用户可为空
-- `username`：本地登录账号；外部用户接入后可使用外部账号名或生成稳定用户名
-- `password`：本地用户明文密码；外部用户可为空
-- `nickname`：IM 展示昵称，可本地设置或由外部系统同步
-- `avatar_url` 用户头像；本地注册用户保存 base64，外部用户可保存头像 URL
-- `auth_source`：用户来源，`local` 表示本地注册，`external` 表示外部系统同步
-- `status`：用户状态，第一版可用 `1` 表示正常，`0` 表示禁用
-
-### conversations
-
-会话表。单聊和群聊都存在这里。
-
-```sql
-CREATE TABLE conversations (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  type ENUM('direct', 'group') NOT NULL,
-  direct_key VARCHAR(64) NULL,
-  title VARCHAR(128) NULL,
-  avatar_url VARCHAR(255) NULL,
-  owner_id BIGINT NULL,
-  last_message_id BIGINT NULL,
-  last_message_at DATETIME NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_conversations_direct_key (direct_key),
-  KEY idx_conversations_last_message_at (last_message_at),
-  KEY idx_conversations_owner_id (owner_id)
-);
-```
-
-字段说明：
-
-- `type`：`direct` 表示单聊，`group` 表示群聊
-- `direct_key`：单聊会话唯一键，格式建议为 `min_user_id:max_user_id`；群聊为空
-- `title`：群聊名称；单聊可为空，由客户端根据对方用户展示
-- `owner_id`：群主用户 ID；单聊可为空
-- `last_message_id` / `last_message_at`：用于会话列表排序
-
-单聊创建时，服务端必须先对两个用户 ID 排序并生成 `direct_key`，通过 `uk_conversations_direct_key` 防止重复创建单聊会话。
-
-### conversation_members
-
-会话成员表。负责单聊成员、群成员、群角色、已读游标和成员状态。
-
-```sql
-CREATE TABLE conversation_members (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  conversation_id BIGINT NOT NULL,
-  user_id BIGINT NOT NULL,
-  role ENUM('owner', 'admin', 'member') NOT NULL DEFAULT 'member',
-  joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  muted_until DATETIME NULL,
-  last_read_message_id BIGINT NULL,
-  last_read_at DATETIME NULL,
-  status ENUM('active', 'left', 'removed') NOT NULL DEFAULT 'active',
-  UNIQUE KEY uk_conversation_members_conversation_user (conversation_id, user_id),
-  KEY idx_conversation_members_user_status (user_id, status),
-  KEY idx_conversation_members_conversation_status (conversation_id, status)
-);
-```
-
-字段说明：
-
-- `role`：群角色；单聊成员统一使用 `member`
-- `muted_until`：预留免打扰或禁言时间
-- `last_read_message_id`：会话级已读游标，用于计算未读数
-- `status`：成员状态，支持退出群聊、被移除等场景
-
-### messages
-
-消息表。所有单聊和群聊消息统一存储。
-
-```sql
-CREATE TABLE messages (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  conversation_id BIGINT NOT NULL,
-  sender_id BIGINT NOT NULL,
-  client_msg_id VARCHAR(64) NOT NULL,
-  message_type ENUM('text', 'image', 'file', 'system') NOT NULL,
-  content JSON NOT NULL,
-  status ENUM('normal', 'recalled', 'deleted') NOT NULL DEFAULT 'normal',
-  sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_messages_sender_client_msg (sender_id, client_msg_id),
-  KEY idx_messages_conversation_id_id (conversation_id, id),
-  KEY idx_messages_sent_at (sent_at)
-);
-```
-
-字段说明：
-
-- `client_msg_id`：客户端生成的消息 ID，用于断线重试时幂等去重
-- `message_type`：消息类型，第一版支持文本、图片、文件、系统消息
-- `content`：JSON 内容，不同消息类型使用不同结构
-- `status`：支持后续撤回、删除
-
-文本消息示例：
-
-```json
-{
-  "text": "hello"
-}
-```
-
-文件消息示例：
-
-```json
-{
-  "url": "https://example.com/a.png",
-  "name": "a.png",
-  "size": 12345
-}
-```
-
-### user_devices
-
-用户设备表。第一版用于记录在线设备和离线推送信息，后续接入移动端推送。
-
-```sql
-CREATE TABLE user_devices (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  user_id BIGINT NOT NULL,
-  device_id VARCHAR(128) NOT NULL,
-  platform ENUM('web', 'ios', 'android', 'desktop') NOT NULL,
-  push_token VARCHAR(255) NULL,
-  last_seen_at DATETIME NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_user_devices_user_device (user_id, device_id)
-);
-```
-
-字段说明：
-
-- `device_id`：客户端设备唯一标识
-- `platform`：设备平台
-- `push_token`：移动端离线推送 token，第一版可为空
-- `last_seen_at`：最近在线时间
-
-### message_receipts
-
-消息回执表。第一版可以暂缓实现，后续需要展示“某条消息谁已读”时再启用。
-
-```sql
-CREATE TABLE message_receipts (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  message_id BIGINT NOT NULL,
-  user_id BIGINT NOT NULL,
-  status ENUM('delivered', 'read') NOT NULL,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_message_receipts_message_user (message_id, user_id)
-);
-```
-
-第一版建议只使用 `conversation_members.last_read_message_id` 做会话级已读和未读数。`message_receipts` 作为扩展表保留在设计中，不进入首批强依赖。
-
-## 表关系
-
-```text
-users 1 - N conversation_members
-conversations 1 - N conversation_members
-conversations 1 - N messages
-users 1 - N messages
-users 1 - N user_devices
-messages 1 - N message_receipts
-```
-
-## 第一版必须落地的表
-
-- `users`
-- `conversations`
-- `conversation_members`
-- `messages`
-- `user_devices`
-
-## 第一版暂缓的表
-
-- `message_receipts`
-
-暂缓原因：会话级未读数可以通过 `conversation_members.last_read_message_id` 和 `messages.id` 计算。逐条消息已读详情属于更细粒度能力，可以在后续版本加入。
-
-## 最小接口契约
-
-第一版建议先实现以下 HTTP 接口，确保注册登录、单聊、群聊、历史消息和未读数能闭环。
-
-### 认证接口
-
-```text
-POST /api/auth/register
-POST /api/auth/login
-```
-
-注册成功后创建 `users` 记录。登录成功后返回 JWT，后续 HTTP 和 WebSocket 请求都携带该 token。
-注册头像通过 `avatar_base64` 传入，服务端直接保存到 `users.avatar_url`。
-
-### 会话接口
-
-```text
 GET  /api/conversations
 POST /api/conversations/direct
 POST /api/conversations/groups
-GET  /api/conversations/{conversation_id}/messages
-POST /api/conversations/{conversation_id}/read
+GET  /api/conversations/:conversation_id/messages
+POST /api/conversations/:conversation_id/messages
+POST /api/resources/upload
+GET  /admin/users
+GET  /ws
 ```
 
-- `GET /api/conversations`：返回当前用户的会话列表、最后一条消息和未读数
-- `POST /api/conversations/direct`：创建或获取一个单聊会话
-- `POST /api/conversations/groups`：创建群聊并写入群成员
-- `GET /api/conversations/{conversation_id}/messages`：分页拉取历史消息
-- `POST /api/conversations/{conversation_id}/read`：更新 `last_read_message_id`
+完整接口以路由文件 [routers/router.go](./routers/router.go) 和 [docs/openapi.json](./docs/openapi.json) 为准。
 
-### 设备接口
+## 常见问题
 
-```text
-POST /api/devices
+### go: toolchain not available
+
+项目要求 `go 1.25.4`，本机 Go 版本较低时会自动下载 toolchain。若当前代理不支持下载，会出现该错误。
+
+可选处理方式：
+
+```bash
+go env -w GOPROXY=https://proxy.golang.org,direct
 ```
 
-用于上报 `device_id`、`platform`、`push_token`，为后续离线推送预留。
+或者直接安装 Go 1.25.4 后重新执行：
 
-## WebSocket 协议
-
-WebSocket 连接建议使用：
-
-```text
-GET /ws?token={jwt}&device_id={device_id}
+```bash
+go version
+go mod tidy
 ```
 
-客户端发送消息：
+### make fresh 报 /bin/fresh: No such file or directory
 
-```json
-{
-  "type": "message.send",
-  "request_id": "req-001",
-  "payload": {
-    "conversation_id": 1,
-    "client_msg_id": "client-001",
-    "message_type": "text",
-    "content": {
-      "text": "hello"
-    }
-  }
-}
+说明 `fresh` 没有安装成功，或者 `go env GOPATH` 因 toolchain 问题没有正常返回。
+
+先解决 Go 版本或 toolchain 下载问题，再安装 fresh：
+
+```bash
+go install github.com/pilu/fresh@v0.0.0-20240621171608-8d1fef547a99
+make fresh
 ```
-
-服务端确认消息：
-
-```json
-{
-  "type": "message.ack",
-  "request_id": "req-001",
-  "payload": {
-    "message_id": 1001,
-    "conversation_id": 1,
-    "client_msg_id": "client-001"
-  }
-}
-```
-
-服务端投递消息：
-
-```json
-{
-  "type": "message.deliver",
-  "payload": {
-    "message_id": 1001,
-    "conversation_id": 1,
-    "sender_id": 2,
-    "message_type": "text",
-    "content": {
-      "text": "hello"
-    },
-    "sent_at": "2026-06-29T12:00:00+08:00"
-  }
-}
-```
-
-第一版需要支持心跳：
-
-```json
-{
-  "type": "ping"
-}
-```
-
-服务端返回：
-
-```json
-{
-  "type": "pong"
-}
-```
-
-## 落地检查
-
-当前方案可以落地，首版实现时需要注意以下边界：
-
-- 单聊必须使用 `direct_key` 做唯一约束，避免 A-B 重复创建多个单聊会话。
-- 发送消息、更新会话最后消息需要放在同一个数据库事务中。
-- 创建群聊时，需要在同一个事务中写入 `conversations` 和 `conversation_members`。
-- `client_msg_id` 必须由客户端生成，服务端用 `(sender_id, client_msg_id)` 保证重试幂等。
-- 未读数第一版可以实时查询计算；如果数据量变大，再引入缓存或冗余计数字段。
-- WebSocket 在线连接保存在单进程内存中；当前项目不引入外部缓存或状态组件，部署时按单实例实时投递能力使用。
-- 图片和视频资源通过 `POST /api/resources/upload` 上传，返回 `/static/...` URL 后可写入消息 `content`。
-
-## 典型流程
-
-### 当前阶段登录
-
-1. 客户端调用注册接口创建本地用户，服务端写入 `users`，并保存明文 `password`。
-2. 客户端调用登录接口提交 `username` 和密码。
-3. 服务端校验密码后签发 JWT。
-4. 客户端访问 IM HTTP 或 WebSocket 接口时携带 JWT。
-5. IM 服务通过 `TokenVerifier` 校验 JWT，并解析 `users.id`。
-
-### 后续外部身份接入
-
-1. 客户端先在外部登录系统完成登录。
-2. 客户端访问 IM HTTP 或 WebSocket 接口时携带外部登录态。
-3. IM 服务通过外部登录适配版 `AuthProvider` 校验登录态，并解析 `external_id`。
-4. IM 服务通过 `UserSyncer` 查询或同步用户资料到 `users` 表。
-5. 后续 IM 业务仍然只使用 `users.id` 作为内部用户 ID。
-
-### 发送消息
-
-1. 客户端通过 WebSocket 发送消息，携带 `conversation_id`、`client_msg_id`、`message_type` 和 `content`。
-2. 服务端校验发送者是否是会话成员。
-3. 服务端通过 `(sender_id, client_msg_id)` 做幂等检查。
-4. 服务端写入 `messages`。
-5. 服务端更新 `conversations.last_message_id` 和 `conversations.last_message_at`。
-6. 服务端查找在线成员，通过 WebSocket 投递消息。
-7. 离线成员不实时投递，后续上线后通过历史消息和未读数同步。
-
-### 拉取会话列表
-
-1. 根据当前用户查询 `conversation_members`。
-2. 关联 `conversations` 获取会话基础信息。
-3. 关联 `messages` 获取最后一条消息。
-4. 使用 `messages.id > conversation_members.last_read_message_id` 计算未读数。
-5. 按 `last_message_at` 倒序返回。
-
-### 标记已读
-
-1. 客户端上报某个会话已读到的 `message_id`。
-2. 服务端校验该消息属于当前会话。
-3. 更新 `conversation_members.last_read_message_id` 和 `last_read_at`。
-4. 后续会话列表未读数基于该游标重新计算。
-
-## 后续扩展方向
-
-- 外部身份适配：按不同外部登录系统实现不同的 `AuthProvider`
-- 多实例部署：当前版本不实现跨节点实时投递，离线用户通过历史消息和未读数补齐
-- 在线状态：使用本进程 WebSocket Hub 判断在线，使用 `user_devices.last_seen_at` 展示最近活跃时间
-- 离线推送：基于 `user_devices.push_token` 接入 APNs、FCM 或厂商推送
-- 消息搜索：为 `messages.content` 建立独立搜索索引
-- 消息分表：按 `conversation_id` 或时间范围拆分 `messages`
-- 精细已读回执：启用 `message_receipts`
