@@ -6,6 +6,7 @@ import (
 
 	"flow-talk/middlewares"
 	"flow-talk/models"
+	"flow-talk/responses"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,7 +39,7 @@ func (ctl AuthController) Register(c *gin.Context) {
 	var req RegisterRequest
 	// ShouldBindJSON 会把请求体 JSON 反序列化到 req，并执行 binding 标签校验。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "参数校验失败"})
+		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
@@ -52,10 +53,10 @@ func (ctl AuthController) Register(c *gin.Context) {
 	// 注册成功后直接签发 token，前端可以立即进入登录态。
 	token, err := middlewares.GenerateToken(user, ctl.JWT)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
+		responses.Error(c, http.StatusInternalServerError, "服务器内部错误")
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"user": user.ToDTO(), "token": token})
+	responses.Success(c, gin.H{"user": user.ToDTO(), "token": token}, "注册成功")
 }
 
 // Login 校验本地账号密码，并签发新的 token。
@@ -63,7 +64,7 @@ func (ctl AuthController) Login(c *gin.Context) {
 	var req LoginRequest
 	// 登录接口只接受 JSON，例如 {"username":"alice","password":"123456"}。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "参数校验失败"})
+		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
@@ -77,10 +78,10 @@ func (ctl AuthController) Login(c *gin.Context) {
 	// 每次登录成功都签发一个新的 token。
 	token, err := middlewares.GenerateToken(user, ctl.JWT)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
+		responses.Error(c, http.StatusInternalServerError, "服务器内部错误")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": user.ToDTO(), "token": token})
+	responses.Success(c, gin.H{"user": user.ToDTO(), "token": token}, "登录成功")
 }
 
 // Me 返回当前 token 对应的用户信息。
@@ -89,10 +90,10 @@ func (ctl AuthController) Me(c *gin.Context) {
 	// 这里直接读取中间件写入的当前用户即可。
 	user, ok := middlewares.CurrentUser(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录或登录已失效"})
+		responses.Error(c, http.StatusUnauthorized, "未登录或登录已失效")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": user.ToDTO()})
+	responses.Success(c, user.ToDTO(), "获取当前用户成功")
 }
 
 // writeModelError 把 model 层错误转换成稳定的 HTTP 状态码和错误码。
@@ -100,14 +101,14 @@ func writeModelError(c *gin.Context, err error) {
 	// model 层只返回领域错误，controller 负责把它们翻译成 HTTP 状态码和前端可识别的 error code。
 	switch {
 	case errors.Is(err, models.ErrUsernameTaken):
-		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
+		responses.Error(c, http.StatusConflict, "用户名已存在")
 	case errors.Is(err, models.ErrValidation):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "参数校验失败"})
+		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 	case errors.Is(err, models.ErrInvalidCredentials):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "账号或密码错误"})
+		responses.Error(c, http.StatusUnauthorized, "账号或密码错误")
 	case errors.Is(err, models.ErrUserDisabled):
-		c.JSON(http.StatusForbidden, gin.H{"error": "用户已禁用"})
+		responses.Error(c, http.StatusForbidden, "用户已禁用")
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
+		responses.Error(c, http.StatusInternalServerError, "服务器内部错误")
 	}
 }

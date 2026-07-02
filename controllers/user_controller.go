@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"flow-talk/models"
+	"flow-talk/responses"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,8 +18,8 @@ func (ctl UserController) Index(c *gin.Context) {
 	// 当前作为管理/调试接口，直接返回用户列表；后续可以加分页、搜索和角色权限。
 	users, err := models.ListUsers()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
+		responses.Error(c, http.StatusInternalServerError, "服务器内部错误")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"users": users})
+	responses.Success(c, users, "获取用户列表成功")
 }

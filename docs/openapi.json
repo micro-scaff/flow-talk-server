@@ -45,41 +45,36 @@
           }
         },
         "responses": {
-          "201": {
+          "200": {
             "description": "注册成功",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
+                  "$ref": "#/components/schemas/AuthApiResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "data": {
+                    "token": "<jwt-token>",
+                    "user": {
+                      "id": 1,
+                      "username": "alice",
+                      "nickname": "Alice",
+                      "avatar_url": "https://example.com/avatar.png",
+                      "auth_source": "local",
+                      "status": 1
+                    }
+                  },
+                  "message": "注册成功"
                 }
               }
             }
           },
           "400": {
-            "description": "参数校验失败",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "error": "参数校验失败"
-                }
-              }
-            }
+            "$ref": "#/components/responses/ValidationError"
           },
           "409": {
-            "description": "用户名已存在",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "error": "用户名已存在"
-                }
-              }
-            }
+            "$ref": "#/components/responses/UsernameTaken"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -113,49 +108,34 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
+                  "$ref": "#/components/schemas/AuthApiResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "data": {
+                    "token": "<jwt-token>",
+                    "user": {
+                      "id": 1,
+                      "username": "alice",
+                      "nickname": "Alice",
+                      "avatar_url": "https://example.com/avatar.png",
+                      "auth_source": "local",
+                      "status": 1
+                    }
+                  },
+                  "message": "登录成功"
                 }
               }
             }
           },
           "400": {
-            "description": "参数校验失败",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "error": "参数校验失败"
-                }
-              }
-            }
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "description": "账号或密码错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "error": "账号或密码错误"
-                }
-              }
-            }
+            "$ref": "#/components/responses/InvalidCredentials"
           },
           "403": {
-            "description": "用户已禁用",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "error": "用户已禁用"
-                }
-              }
-            }
+            "$ref": "#/components/responses/UserDisabled"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -180,7 +160,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/UserApiResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "data": {
+                    "id": 1,
+                    "username": "alice",
+                    "nickname": "Alice",
+                    "avatar_url": "https://example.com/avatar.png",
+                    "auth_source": "local",
+                    "status": 1
+                  },
+                  "message": "获取当前用户成功"
                 }
               }
             }
@@ -208,7 +200,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserListResponse"
+                  "$ref": "#/components/schemas/UserListApiResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "data": [
+                    {
+                      "id": 2,
+                      "username": "bob",
+                      "nickname": "Bob",
+                      "avatar_url": "",
+                      "auth_source": "local",
+                      "status": 1
+                    },
+                    {
+                      "id": 1,
+                      "username": "alice",
+                      "nickname": "Alice",
+                      "avatar_url": "https://example.com/avatar.png",
+                      "auth_source": "local",
+                      "status": 1
+                    }
+                  ],
+                  "message": "获取用户列表成功"
                 }
               }
             }
@@ -233,15 +247,77 @@
       }
     },
     "responses": {
+      "ValidationError": {
+        "description": "参数校验失败",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorApiResponse"
+            },
+            "example": {
+              "code": 400,
+              "data": null,
+              "message": "参数校验失败"
+            }
+          }
+        }
+      },
       "Unauthorized": {
         "description": "未登录或登录已失效",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/ErrorApiResponse"
             },
             "example": {
-              "error": "未登录或登录已失效"
+              "code": 401,
+              "data": null,
+              "message": "未登录或登录已失效"
+            }
+          }
+        }
+      },
+      "InvalidCredentials": {
+        "description": "账号或密码错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorApiResponse"
+            },
+            "example": {
+              "code": 401,
+              "data": null,
+              "message": "账号或密码错误"
+            }
+          }
+        }
+      },
+      "UserDisabled": {
+        "description": "用户已禁用",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorApiResponse"
+            },
+            "example": {
+              "code": 403,
+              "data": null,
+              "message": "用户已禁用"
+            }
+          }
+        }
+      },
+      "UsernameTaken": {
+        "description": "用户名已存在",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorApiResponse"
+            },
+            "example": {
+              "code": 409,
+              "data": null,
+              "message": "用户名已存在"
             }
           }
         }
@@ -251,10 +327,12 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/ErrorApiResponse"
             },
             "example": {
-              "error": "服务器内部错误"
+              "code": 500,
+              "data": null,
+              "message": "服务器内部错误"
             }
           }
         }
@@ -344,7 +422,7 @@
           }
         }
       },
-      "AuthResponse": {
+      "AuthData": {
         "type": "object",
         "properties": {
           "token": {
@@ -357,31 +435,71 @@
           }
         }
       },
-      "UserResponse": {
+      "AuthApiResponse": {
         "type": "object",
         "properties": {
-          "user": {
-            "$ref": "#/components/schemas/User"
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/AuthData"
+          },
+          "message": {
+            "type": "string",
+            "example": "登录成功"
           }
         }
       },
-      "UserListResponse": {
+      "UserApiResponse": {
         "type": "object",
         "properties": {
-          "users": {
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/User"
+          },
+          "message": {
+            "type": "string",
+            "example": "获取当前用户成功"
+          }
+        }
+      },
+      "UserListApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "data": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/User"
             }
+          },
+          "message": {
+            "type": "string",
+            "example": "获取用户列表成功"
           }
         }
       },
-      "ErrorResponse": {
+      "ErrorApiResponse": {
         "type": "object",
         "properties": {
-          "error": {
+          "code": {
+            "type": "integer",
+            "example": 400
+          },
+          "data": {
+            "nullable": true,
+            "example": null
+          },
+          "message": {
             "type": "string",
-            "description": "错误信息",
+            "description": "接口信息或错误信息",
             "example": "参数校验失败"
           }
         }

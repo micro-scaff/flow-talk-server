@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"flow-talk/models"
+	"flow-talk/responses"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,14 +34,14 @@ func AuthRequired(cfg models.JWTConfig) gin.HandlerFunc {
 		// 约定格式：Authorization: Bearer <token>
 		token := bearerToken(c.GetHeader("Authorization"))
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录或登录已失效"})
+			responses.Abort(c, http.StatusUnauthorized, "未登录或登录已失效")
 			return
 		}
 
 		// 2. 校验 token 签名和过期时间，并解析出用户 ID。
 		claims, err := VerifyToken(token, cfg.Secret)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录或登录已失效"})
+			responses.Abort(c, http.StatusUnauthorized, "未登录或登录已失效")
 			return
 		}
 
@@ -48,7 +49,7 @@ func AuthRequired(cfg models.JWTConfig) gin.HandlerFunc {
 		// 这样即使用户已经拿到旧 token，只要后台禁用了该用户，下一次请求也会失效。
 		user, err := models.FindUserByID(claims.UserID)
 		if err != nil || user.Status != models.UserStatusEnabled {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录或登录已失效"})
+			responses.Abort(c, http.StatusUnauthorized, "未登录或登录已失效")
 			return
 		}
 
