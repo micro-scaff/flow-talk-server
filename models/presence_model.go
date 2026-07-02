@@ -17,7 +17,7 @@ func GetUserPresence(hub *WSHub, userID int64) (PresenceDTO, error) {
 	}
 
 	// 在线状态优先取 Hub 的本机连接快照。
-	// 这是实时值，但只代表当前进程；多实例部署时应由 Redis presence 或 RealtimeBus 聚合。
+	// 当前项目不引入外部状态组件，所以这个实时值只代表当前服务进程。
 	presence := hub.LocalPresence(userID)
 	// last_seen_at 来自设备表，即使用户当前离线，也能给客户端展示最近活跃时间。
 	seenAt, err := LatestDeviceSeenAt(userID)

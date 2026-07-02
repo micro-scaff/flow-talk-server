@@ -444,7 +444,7 @@ GET /ws?token={jwt}&device_id={device_id}
 - 创建群聊时，需要在同一个事务中写入 `conversations` 和 `conversation_members`。
 - `client_msg_id` 必须由客户端生成，服务端用 `(sender_id, client_msg_id)` 保证重试幂等。
 - 未读数第一版可以实时查询计算；如果数据量变大，再引入缓存或冗余计数字段。
-- WebSocket 在线连接第一版可以只保存在单进程内存中；多实例部署时再引入 Redis 或消息队列。
+- WebSocket 在线连接保存在单进程内存中；当前项目不引入外部缓存或状态组件，部署时按单实例实时投递能力使用。
 - 图片和视频资源通过 `POST /api/resources/upload` 上传，返回 `/static/...` URL 后可写入消息 `content`。
 
 ## 典型流程
@@ -493,8 +493,8 @@ GET /ws?token={jwt}&device_id={device_id}
 ## 后续扩展方向
 
 - 外部身份适配：按不同外部登录系统实现不同的 `AuthProvider`
-- 多实例部署：引入 Redis Pub/Sub 或消息队列做跨节点投递
-- 在线状态：使用 Redis 维护用户连接状态
+- 多实例部署：当前版本不实现跨节点实时投递，离线用户通过历史消息和未读数补齐
+- 在线状态：使用本进程 WebSocket Hub 判断在线，使用 `user_devices.last_seen_at` 展示最近活跃时间
 - 离线推送：基于 `user_devices.push_token` 接入 APNs、FCM 或厂商推送
 - 消息搜索：为 `messages.content` 建立独立搜索索引
 - 消息分表：按 `conversation_id` 或时间范围拆分 `messages`
