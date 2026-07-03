@@ -13,7 +13,10 @@ import (
 )
 
 // MessageController 处理会话内消息相关接口。
-type MessageController struct{}
+type MessageController struct {
+	Hub *models.WSHub
+	Bus models.RealtimeBus
+}
 
 // SendMessageRequest 是发送消息的请求体。
 // Content 使用 json.RawMessage，让 model 层按 message_type 做结构化校验。
@@ -52,6 +55,20 @@ func (ctl MessageController) Create(c *gin.Context) {
 		writeMessageError(c, err)
 		return
 	}
+
+	memberIDs, err := models.ListActiveConversationMemberIDs(message.ConversationID)
+	if err != nil {
+		writeMessageError(c, err)
+		return
+	}
+	if err := publishMessageDeliver(ctl.Bus, ctl.Hub, models.MessageDeliverEvent{
+		UserIDs: memberIDs,
+		Message: message,
+	}); err != nil {
+		writeMessageError(c, err)
+		return
+	}
+
 	responses.Success(c, message, "发送消息成功")
 }
 

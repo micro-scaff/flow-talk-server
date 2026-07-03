@@ -49,6 +49,10 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		Bus:             realtimeBus,
 		PresenceTracker: presenceTracker,
 	}
+	messageController = controllers.MessageController{
+		Hub: wsHub,
+		Bus: realtimeBus,
+	}
 	presenceController := controllers.PresenceController{PresenceProvider: presenceProvider}
 
 	engine.GET("/ws", wsController.Connect)

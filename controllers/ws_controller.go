@@ -179,11 +179,7 @@ func (ctl WSController) handleMessageSend(user models.User, event models.WSEvent
 }
 
 func (ctl WSController) publishMessageDeliver(event models.MessageDeliverEvent) error {
-	if ctl.Bus == nil {
-		DeliverMessageToLocalHub(ctl.Hub, event)
-		return nil
-	}
-	return ctl.Bus.PublishMessageDeliver(event)
+	return publishMessageDeliver(ctl.Bus, ctl.Hub, event)
 }
 
 func (ctl WSController) presenceTracker() models.PresenceTracker {
@@ -207,6 +203,14 @@ func DeliverMessageToLocalHub(hub *models.WSHub, event models.MessageDeliverEven
 			_ = models.MarkMessageDelivered(event.Message.ID, userID)
 		}
 	}
+}
+
+func publishMessageDeliver(bus models.RealtimeBus, hub *models.WSHub, event models.MessageDeliverEvent) error {
+	if bus == nil {
+		DeliverMessageToLocalHub(hub, event)
+		return nil
+	}
+	return bus.PublishMessageDeliver(event)
 }
 
 func wsMessageForError(err error) string {

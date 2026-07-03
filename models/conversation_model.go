@@ -81,7 +81,7 @@ type ConversationMember struct {
 	ConversationID    int64      `gorm:"column:conversation_id" json:"conversation_id"`
 	UserID            int64      `gorm:"column:user_id" json:"user_id"`
 	Role              string     `gorm:"column:role" json:"role"`
-	JoinedAt          time.Time  `gorm:"column:joined_at" json:"joined_at"`
+	JoinedAt          time.Time  `gorm:"column:joined_at;autoCreateTime" json:"joined_at"`
 	MutedUntil        *time.Time `gorm:"column:muted_until" json:"muted_until,omitempty"`
 	LastReadMessageID *int64     `gorm:"column:last_read_message_id" json:"last_read_message_id,omitempty"`
 	LastReadAt        *time.Time `gorm:"column:last_read_at" json:"last_read_at,omitempty"`
@@ -391,6 +391,7 @@ func AddGroupMembers(operatorID int64, conversationID int64, userIDs []int64) ([
 					ConversationID: conversationID,
 					UserID:         userID,
 					Role:           MemberRoleMember,
+					JoinedAt:       time.Now(),
 					Status:         MemberStatusActive,
 				}
 				if err := tx.Create(&member).Error; err != nil {
@@ -699,13 +700,15 @@ func countUnreadMessages(userID int64, conversationID int64) (int64, error) {
 }
 
 func buildDirectMembers(conversationID int64, userID int64, targetUserID int64) []ConversationMember {
+	now := time.Now()
 	return []ConversationMember{
-		{ConversationID: conversationID, UserID: userID, Role: MemberRoleMember, Status: MemberStatusActive},
-		{ConversationID: conversationID, UserID: targetUserID, Role: MemberRoleMember, Status: MemberStatusActive},
+		{ConversationID: conversationID, UserID: userID, Role: MemberRoleMember, JoinedAt: now, Status: MemberStatusActive},
+		{ConversationID: conversationID, UserID: targetUserID, Role: MemberRoleMember, JoinedAt: now, Status: MemberStatusActive},
 	}
 }
 
 func buildGroupMembers(conversationID int64, ownerID int64, memberIDs []int64) []ConversationMember {
+	now := time.Now()
 	members := make([]ConversationMember, 0, len(memberIDs))
 	for _, memberID := range memberIDs {
 		role := MemberRoleMember
@@ -716,6 +719,7 @@ func buildGroupMembers(conversationID int64, ownerID int64, memberIDs []int64) [
 			ConversationID: conversationID,
 			UserID:         memberID,
 			Role:           role,
+			JoinedAt:       now,
 			Status:         MemberStatusActive,
 		})
 	}

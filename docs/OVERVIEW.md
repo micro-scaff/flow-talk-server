@@ -82,6 +82,7 @@
 - [README.md](../README.md)：本地运行、目录结构、常用命令
 - [docs/openapi.json](./openapi.json)：Apifox 可导入的 OpenAPI 文件
 - [接口文档生成](./接口文档生成.md)：接口文档维护方式
+- [前端对接文档](./前端对接文档.md)：前端项目生成和接口接入说明
 - [数据库落地执行指南](./数据库/数据库落地执行指南.md)：本地 MySQL 建库建表步骤
 - [数据库表关系](./数据库/数据库表关系.md)：表关系和落地顺序
 - [图片、视频等资源存放](./图片、视频等资源存放.md)：上传资源约定
@@ -300,6 +301,8 @@ GET /ws?token={jwt}&device_id={device_id}
 
 ### 发送消息
 
+聊天页面发送消息首选 WebSocket `message.send`，这样发送确认和对端实时投递都走同一条长连接协议。HTTP `POST /api/conversations/:conversation_id/messages` 保留给调试、脚本、弱网降级和 WebSocket 不可用时的补偿发送。
+
 客户端发送：
 
 ```json
@@ -357,6 +360,15 @@ GET /ws?token={jwt}&device_id={device_id}
 }
 ```
 
+前端处理建议：
+
+1. 发送前生成稳定 `client_msg_id`，先在当前会话插入一条本地 `sending` 消息。
+2. WebSocket 可用时发送 `message.send`，不要再同时调用 HTTP 发送接口，避免重复请求。
+3. 收到 `message.ack` 后，用 `client_msg_id` 或服务端 `id` 把本地 `sending` 消息替换为服务端消息。
+4. 收到 `message.deliver` 后，按 `id` 去重；如果属于当前会话则追加到消息列表，否则只刷新会话列表未读数和最后消息。
+5. 如果 WebSocket 未连接或发送超时，可以使用同一个 `client_msg_id` 走 HTTP 发送接口降级；服务端会按 `(sender_id, client_msg_id)` 幂等。
+6. 没收到 `message.ack` 时，客户端可以使用同一个 `client_msg_id` 重试，不要生成新的 `client_msg_id`。
+
 事件处理失败时返回：
 
 ```json
@@ -398,11 +410,11 @@ GET /ws?token={jwt}&device_id={device_id}
 
 ### 发送消息
 
-1. 客户端通过 HTTP 或 WebSocket 发送消息。
+1. 聊天页面优先通过 WebSocket `message.send` 发送消息；HTTP 发送接口只作为调试或降级路径。
 2. 服务端校验发送者仍是会话 active 成员。
 3. 服务端用 `(sender_id, client_msg_id)` 做幂等。
 4. 服务端写入 `messages` 并更新会话最后消息。
-5. WebSocket 入口会继续向在线 active 成员实时投递。
+5. 服务端向在线 active 成员实时投递 `message.deliver`。
 6. 离线成员上线后通过会话列表未读数和历史消息补齐。
 
 ### 标记已读

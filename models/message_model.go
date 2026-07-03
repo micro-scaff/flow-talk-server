@@ -430,12 +430,12 @@ func findMessageByIDWithDB(db *gorm.DB, messageID int64) (Message, error) {
 
 func findMessageByClientMsgIDWithDB(db *gorm.DB, senderID int64, clientMsgID string) (Message, error) {
 	var message Message
-	err := db.Where("sender_id = ? AND client_msg_id = ?", senderID, clientMsgID).First(&message).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return Message{}, ErrMessageNotFound
+	result := db.Where("sender_id = ? AND client_msg_id = ?", senderID, clientMsgID).Limit(1).Find(&message)
+	if result.Error != nil {
+		return Message{}, fmt.Errorf("查询消息失败: %w", result.Error)
 	}
-	if err != nil {
-		return Message{}, fmt.Errorf("查询消息失败: %w", err)
+	if result.RowsAffected == 0 {
+		return Message{}, ErrMessageNotFound
 	}
 	return message, nil
 }
