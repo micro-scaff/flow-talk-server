@@ -169,14 +169,15 @@ func LatestDeviceSeenAt(userID int64) (*time.Time, error) {
 	// 在线状态接口会使用这个值作为离线用户的最近活跃时间。
 	// 没有设备记录时返回 nil，不把“没有上报过设备”当成错误。
 	var device UserDevice
-	err := DB.Where("user_id = ? AND last_seen_at IS NOT NULL", userID).
+	result := DB.Where("user_id = ? AND last_seen_at IS NOT NULL", userID).
 		Order("last_seen_at DESC").
-		First(&device).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
+		Limit(1).
+		Find(&device)
+	if result.Error != nil {
+		return nil, fmt.Errorf("查询设备活跃时间失败: %w", result.Error)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("查询设备活跃时间失败: %w", err)
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return device.LastSeenAt, nil
 }
