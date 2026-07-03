@@ -67,7 +67,7 @@ func GetUserPresence(provider PresenceProvider, userID int64) (PresenceDTO, erro
 	if DB == nil {
 		return presence, nil
 	}
-	// last_seen_at 来自设备表，即使用户当前离线，也能给客户端展示最近活跃时间。
+	// last_seen_at 取自设备表 updated_at，即使用户当前离线，也能给客户端展示最近活跃时间。
 	seenAt, err := LatestDeviceSeenAt(userID)
 	if err != nil {
 		return PresenceDTO{}, err

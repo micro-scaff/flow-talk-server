@@ -136,6 +136,9 @@ POST /api/conversations/direct
 POST /api/conversations/groups
 GET  /api/conversations/:conversation_id/messages
 POST /api/conversations/:conversation_id/messages  HTTP 降级发送
+POST /api/devices
+GET  /api/devices
+DELETE /api/devices
 POST /api/resources/upload
 GET  /api/admin/users
 GET  /api/ws

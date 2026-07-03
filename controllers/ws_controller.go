@@ -52,10 +52,8 @@ func (ctl WSController) Connect(c *gin.Context) {
 	wsConn := models.NewWSConnection(user.ID, strings.TrimSpace(c.Query("device_id")))
 	ctl.Hub.Add(wsConn)
 	_ = ctl.presenceTracker().AddConnection(wsConn)
-	if wsConn.DeviceID != "" {
-		// 设备表属于 v5 能力；这里忽略“不存在设备”的错误，让纯 WebSocket 调试不被设备上报流程阻塞。
-		_ = models.TouchUserDevice(user.ID, wsConn.DeviceID)
-	}
+	// 设备表属于 v5 能力；这里忽略“不存在设备”的错误，让纯 WebSocket 调试不被设备上报流程阻塞。
+	_ = models.TouchUserDevice(user.ID)
 
 	// 写循环独立 goroutine，从 wsConn.Send 队列取消息写回客户端。
 	// 读循环留在当前请求 goroutine 中，直到连接断开后触发 defer 清理。
@@ -105,10 +103,8 @@ func (ctl WSController) readLoop(user models.User, socket *websocket.Conn, wsCon
 
 		ctl.Hub.Touch(wsConn.UserID, wsConn.ID)
 		_ = ctl.presenceTracker().TouchConnection(wsConn)
-		if wsConn.DeviceID != "" {
-			// 心跳或任意事件都可以视为设备活跃，用来支撑 v5 最近在线时间。
-			_ = models.TouchUserDevice(wsConn.UserID, wsConn.DeviceID)
-		}
+		// 心跳或任意事件都可以视为设备活跃，用来支撑 v5 最近在线时间。
+		_ = models.TouchUserDevice(wsConn.UserID)
 
 		var event models.WSEvent
 		if err := json.Unmarshal(payload, &event); err != nil {

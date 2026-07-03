@@ -94,7 +94,7 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		{
 			devices.POST("", deviceController.Upsert)
 			devices.GET("", deviceController.Index)
-			devices.DELETE("/:device_id", deviceController.Delete)
+			devices.DELETE("", deviceController.Delete)
 		}
 
 		messages := api.Group("/messages", middlewares.AuthRequired(cfg.JWT))

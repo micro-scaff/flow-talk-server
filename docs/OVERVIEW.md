@@ -44,7 +44,7 @@
 - 当前用户设备上报、查询和删除
 - WebSocket 建连或收到事件时刷新设备最近活跃时间
 - 离线用户不依赖实时投递，上线后通过会话列表、未读数和历史消息补齐
-- 保留 `push_token`，但当前不接入 APNs、FCM 或厂商推送
+- 设备详情保存为客户端上报的 JSON，服务端不限制内部字段
 
 ### v6：群管理与消息状态
 
@@ -160,7 +160,7 @@ messages
   文本、图片、文件、系统消息，支持幂等发送、撤回、删除
 
 user_devices
-  设备标识、平台、推送 token、最近活跃时间
+  用户设备 JSON 数据、最近活跃时间
 
 message_receipts
   单条消息的 delivered/read 回执
@@ -173,7 +173,7 @@ users 1 - N conversation_members
 conversations 1 - N conversation_members
 conversations 1 - N messages
 users 1 - N messages
-users 1 - N user_devices
+users 1 - 1 user_devices
 messages 1 - N message_receipts
 ```
 
@@ -223,7 +223,7 @@ PATCH /api/messages/:message_id/delete
 ```text
 POST   /api/devices
 GET    /api/devices
-DELETE /api/devices/:device_id
+DELETE /api/devices
 GET    /api/users/:user_id/presence
 POST   /api/users/presence/batch
 GET    /api/messages/:message_id/receipts
@@ -249,7 +249,7 @@ GET  /api/ws
 GET /api/ws?token={jwt}&device_id={device_id}
 ```
 
-`token` 必填。`device_id` 可选，传入后服务端会刷新设备最近活跃时间。
+`token` 必填。`device_id` 可选，仅用于连接标识；服务端会按当前用户刷新设备最近活跃时间。
 
 统一事件信封：
 

@@ -842,9 +842,12 @@
                 "$ref": "#/components/schemas/UpsertDeviceRequest"
               },
               "example": {
-                "device_id": "web-001",
-                "platform": "web",
-                "push_token": ""
+                "user_id": 1,
+                "data": {
+                  "platform": "web",
+                  "device_id": "web-001",
+                  "app_version": "1.0.0"
+                }
               }
             }
           }
@@ -875,6 +878,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -917,24 +923,12 @@
             "$ref": "#/components/responses/InternalError"
           }
         }
-      }
-    },
-    "/api/devices/{device_id}": {
+      },
       "delete": {
         "tags": [
           "设备"
         ],
-        "summary": "删除设备",
-        "parameters": [
-          {
-            "name": "device_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "summary": "删除当前用户设备上报数据",
         "responses": {
           "200": {
             "description": "删除设备成功",
@@ -2513,27 +2507,23 @@
       "UpsertDeviceRequest": {
         "type": "object",
         "required": [
-          "device_id",
-          "platform"
+          "user_id",
+          "data"
         ],
         "properties": {
-          "device_id": {
-            "type": "string",
-            "example": "web-001"
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
           },
-          "platform": {
-            "type": "string",
-            "enum": [
-              "web",
-              "ios",
-              "android",
-              "desktop"
-            ],
-            "example": "web"
-          },
-          "push_token": {
-            "type": "string",
-            "example": "push-token"
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": {
+              "platform": "web",
+              "device_id": "web-001",
+              "app_version": "1.0.0"
+            }
           }
         }
       },
@@ -2550,19 +2540,16 @@
             "format": "int64",
             "example": 1
           },
-          "device_id": {
-            "type": "string",
-            "example": "web-001"
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": {
+              "platform": "web",
+              "device_id": "web-001",
+              "app_version": "1.0.0"
+            }
           },
-          "platform": {
-            "type": "string",
-            "example": "web"
-          },
-          "push_token": {
-            "type": "string",
-            "example": "push-token"
-          },
-          "last_seen_at": {
+          "updated_at": {
             "type": "string",
             "example": "2026-06-29T12:00:00+08:00"
           }
