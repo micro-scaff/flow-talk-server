@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"flow-talk/models"
 	"flow-talk/responses"
@@ -21,13 +20,22 @@ type MessageController struct {
 // SendMessageRequest 是发送消息的请求体。
 // Content 使用 json.RawMessage，让 model 层按 message_type 做结构化校验。
 type SendMessageRequest struct {
-	ClientMsgID string          `json:"client_msg_id" binding:"required"`
-	MessageType string          `json:"message_type" binding:"required"`
-	Content     json.RawMessage `json:"content" binding:"required"`
+	ConversationID int64           `json:"conversation_id" binding:"required"`
+	ClientMsgID    string          `json:"client_msg_id" binding:"required"`
+	MessageType    string          `json:"message_type" binding:"required"`
+	Content        json.RawMessage `json:"content" binding:"required"`
+}
+
+// ListMessagesRequest 是分页拉取历史消息的请求体。
+type ListMessagesRequest struct {
+	ConversationID int64 `json:"conversation_id" binding:"required"`
+	BeforeID       int64 `json:"before_id"`
+	Limit          int   `json:"limit"`
 }
 
 // MarkReadRequest 是标记会话已读的请求体。
 type MarkReadRequest struct {
+	ConversationID    int64 `json:"conversation_id" binding:"required"`
 	LastReadMessageID int64 `json:"last_read_message_id" binding:"required"`
 }
 
@@ -38,19 +46,13 @@ func (ctl MessageController) Create(c *gin.Context) {
 		return
 	}
 
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-
 	var req SendMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
-	message, err := models.SendMessage(user.ID, conversationID, req.ClientMsgID, req.MessageType, req.Content)
+	message, err := models.SendMessage(user.ID, req.ConversationID, req.ClientMsgID, req.MessageType, req.Content)
 	if err != nil {
 		writeMessageError(c, err)
 		return
@@ -79,24 +81,13 @@ func (ctl MessageController) Index(c *gin.Context) {
 		return
 	}
 
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
+	var req ListMessagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
-	beforeID, err := parseOptionalInt64Query(c, "before_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-	limit, err := parseOptionalIntQuery(c, "limit")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-
-	page, err := models.ListMessages(user.ID, conversationID, beforeID, limit)
+	page, err := models.ListMessages(user.ID, req.ConversationID, req.BeforeID, req.Limit)
 	if err != nil {
 		writeMessageError(c, err)
 		return
@@ -111,94 +102,18 @@ func (ctl MessageController) MarkRead(c *gin.Context) {
 		return
 	}
 
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-
 	var req MarkReadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
-	state, err := models.MarkConversationRead(user.ID, conversationID, req.LastReadMessageID)
+	state, err := models.MarkConversationRead(user.ID, req.ConversationID, req.LastReadMessageID)
 	if err != nil {
 		writeMessageError(c, err)
 		return
 	}
 	responses.Success(c, state, "标记已读成功")
-}
-
-// Recall 撤回一条消息。
-func (ctl MessageController) Recall(c *gin.Context) {
-	user, ok := currentUserOrUnauthorized(c)
-	if !ok {
-		return
-	}
-
-	messageID, err := parseIDParam(c, "message_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-
-	message, err := models.RecallMessage(user.ID, messageID)
-	if err != nil {
-		writeMessageError(c, err)
-		return
-	}
-	responses.Success(c, message, "撤回消息成功")
-}
-
-// Delete 删除一条消息。
-func (ctl MessageController) Delete(c *gin.Context) {
-	user, ok := currentUserOrUnauthorized(c)
-	if !ok {
-		return
-	}
-
-	messageID, err := parseIDParam(c, "message_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-
-	message, err := models.DeleteMessage(user.ID, messageID)
-	if err != nil {
-		writeMessageError(c, err)
-		return
-	}
-	responses.Success(c, message, "删除消息成功")
-}
-
-// parseOptionalInt64Query 解析可选的 int64 query 参数。
-// 空值表示客户端没有传该参数，调用方通常用 0 触发 model 层默认逻辑。
-func parseOptionalInt64Query(c *gin.Context, name string) (int64, error) {
-	value := c.Query(name)
-	if value == "" {
-		return 0, nil
-	}
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed < 0 {
-		return 0, errors.New("invalid int64 query")
-	}
-	return parsed, nil
-}
-
-// parseOptionalIntQuery 解析可选的 int query 参数。
-// 当前用于消息分页 limit，负数和非数字都会被视为参数错误。
-func parseOptionalIntQuery(c *gin.Context, name string) (int, error) {
-	value := c.Query(name)
-	if value == "" {
-		return 0, nil
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed < 0 {
-		return 0, errors.New("invalid int query")
-	}
-	return parsed, nil
 }
 
 // writeMessageError 把消息领域错误翻译成 HTTP 状态码。
@@ -208,8 +123,7 @@ func writeMessageError(c *gin.Context, err error) {
 		errors.Is(err, models.ErrInvalidMember),
 		errors.Is(err, models.ErrInvalidMessageType),
 		errors.Is(err, models.ErrInvalidMessageContent),
-		errors.Is(err, models.ErrReadCursorInvalid),
-		errors.Is(err, models.ErrInvalidMessageStatus):
+		errors.Is(err, models.ErrReadCursorInvalid):
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 	case errors.Is(err, models.ErrMessageForbidden),
 		errors.Is(err, models.ErrConversationForbidden):

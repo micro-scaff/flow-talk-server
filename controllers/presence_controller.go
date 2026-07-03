@@ -16,6 +16,11 @@ type PresenceController struct {
 	PresenceProvider models.PresenceProvider
 }
 
+// PresenceRequest 是单个用户在线状态查询请求。
+type PresenceRequest struct {
+	UserID int64 `json:"user_id" binding:"required"`
+}
+
 // BatchPresenceRequest 是批量在线状态查询请求。
 // model 层会去掉非法 ID 和重复 ID，保证返回结果稳定。
 type BatchPresenceRequest struct {
@@ -30,13 +35,13 @@ func (ctl PresenceController) Show(c *gin.Context) {
 		return
 	}
 
-	userID, err := parseIDParam(c, "user_id")
-	if err != nil {
+	var req PresenceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
-	presence, err := models.GetUserPresence(ctl.PresenceProvider, userID)
+	presence, err := models.GetUserPresence(ctl.PresenceProvider, req.UserID)
 	if err != nil {
 		writePresenceError(c, err)
 		return

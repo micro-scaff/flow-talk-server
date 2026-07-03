@@ -17,20 +17,30 @@ type GroupController struct{}
 // AddMembersRequest 是添加群成员请求。
 // user_ids 可以包含重复 ID，model 层会统一去重和校验用户是否存在。
 type AddMembersRequest struct {
-	UserIDs []int64 `json:"user_ids" binding:"required"`
+	ConversationID int64   `json:"conversation_id" binding:"required"`
+	UserIDs        []int64 `json:"user_ids" binding:"required"`
+}
+
+// RemoveMemberRequest 是移除群成员请求。
+type RemoveMemberRequest struct {
+	ConversationID int64 `json:"conversation_id" binding:"required"`
+	UserID         int64 `json:"user_id" binding:"required"`
 }
 
 // UpdateMemberRoleRequest 是设置管理员/普通成员的请求。
 // owner 角色不能通过这个接口设置，避免绕开群主转让流程。
 type UpdateMemberRoleRequest struct {
-	Role string `json:"role" binding:"required"`
+	ConversationID int64  `json:"conversation_id" binding:"required"`
+	UserID         int64  `json:"user_id" binding:"required"`
+	Role           string `json:"role" binding:"required"`
 }
 
 // UpdateGroupProfileRequest 是修改群资料请求。
 // title 必填，avatar_url 可为空；空头像会在数据库中保存为 NULL。
 type UpdateGroupProfileRequest struct {
-	Title     string `json:"title" binding:"required"`
-	AvatarURL string `json:"avatar_url"`
+	ConversationID int64  `json:"conversation_id" binding:"required"`
+	Title          string `json:"title" binding:"required"`
+	AvatarURL      string `json:"avatar_url"`
 }
 
 // AddMembers 向群聊添加成员。
@@ -38,11 +48,6 @@ type UpdateGroupProfileRequest struct {
 func (ctl GroupController) AddMembers(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
-		return
-	}
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
@@ -54,7 +59,7 @@ func (ctl GroupController) AddMembers(c *gin.Context) {
 
 	// 添加成员支持重新激活 left/removed 成员。
 	// 具体权限矩阵：owner/admin 可添加，member 不可添加。
-	members, err := models.AddGroupMembers(user.ID, conversationID, req.UserIDs)
+	members, err := models.AddGroupMembers(user.ID, req.ConversationID, req.UserIDs)
 	if err != nil {
 		writeGroupError(c, err)
 		return
@@ -69,19 +74,15 @@ func (ctl GroupController) RemoveMember(c *gin.Context) {
 	if !ok {
 		return
 	}
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-	targetUserID, err := parseIDParam(c, "user_id")
-	if err != nil {
+
+	var req RemoveMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
 	// 移除成员时禁止移除群主；管理员只能移除普通成员。
-	if err := models.RemoveGroupMember(user.ID, conversationID, targetUserID); err != nil {
+	if err := models.RemoveGroupMember(user.ID, req.ConversationID, req.UserID); err != nil {
 		writeGroupError(c, err)
 		return
 	}
@@ -95,15 +96,16 @@ func (ctl GroupController) Leave(c *gin.Context) {
 	if !ok {
 		return
 	}
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
+
+	var req ConversationIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
 	// 群主不能直接退出，避免群聊没有 owner。
 	// 后续如果实现群主转让，可以先转让再退出。
-	if err := models.LeaveGroup(user.ID, conversationID); err != nil {
+	if err := models.LeaveGroup(user.ID, req.ConversationID); err != nil {
 		writeGroupError(c, err)
 		return
 	}
@@ -117,16 +119,6 @@ func (ctl GroupController) UpdateMemberRole(c *gin.Context) {
 	if !ok {
 		return
 	}
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-	targetUserID, err := parseIDParam(c, "user_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
 
 	var req UpdateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -135,7 +127,7 @@ func (ctl GroupController) UpdateMemberRole(c *gin.Context) {
 	}
 
 	// 只有 owner 可以设置 admin/member，且不能修改 owner 本身。
-	member, err := models.UpdateMemberRole(user.ID, conversationID, targetUserID, req.Role)
+	member, err := models.UpdateMemberRole(user.ID, req.ConversationID, req.UserID, req.Role)
 	if err != nil {
 		writeGroupError(c, err)
 		return
@@ -144,15 +136,10 @@ func (ctl GroupController) UpdateMemberRole(c *gin.Context) {
 }
 
 // UpdateProfile 修改群聊资料。
-// 路由复用 conversations/:conversation_id，因此 model 层仍会检查该会话必须是 group。
+// model 层会检查该会话必须是 group。
 func (ctl GroupController) UpdateProfile(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
-		return
-	}
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
@@ -163,7 +150,7 @@ func (ctl GroupController) UpdateProfile(c *gin.Context) {
 	}
 
 	// 群资料修改允许 owner/admin 操作，普通成员只读。
-	conversation, err := models.UpdateGroupProfile(user.ID, conversationID, req.Title, req.AvatarURL)
+	conversation, err := models.UpdateGroupProfile(user.ID, req.ConversationID, req.Title, req.AvatarURL)
 	if err != nil {
 		writeGroupError(c, err)
 		return

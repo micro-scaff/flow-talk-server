@@ -147,7 +147,6 @@ func (h *WSHub) Touch(userID int64, connectionID string) {
 }
 
 // OnlineUserIDs 过滤出在本进程至少有一条连接的用户 ID。
-// v7 回执写入 delivered 时会用它避免把离线用户误标记为已送达。
 func (h *WSHub) OnlineUserIDs(userIDs []int64) []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

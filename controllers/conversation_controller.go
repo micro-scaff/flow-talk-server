@@ -3,7 +3,6 @@ package controllers
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"flow-talk/middlewares"
 	"flow-talk/models"
@@ -14,6 +13,11 @@ import (
 
 // ConversationController 处理会话相关接口。
 type ConversationController struct{}
+
+// ConversationIDRequest 是只需要会话 ID 的通用请求体。
+type ConversationIDRequest struct {
+	ConversationID int64 `json:"conversation_id" binding:"required"`
+}
 
 // CreateDirectConversationRequest 是创建或获取单聊的请求体。
 type CreateDirectConversationRequest struct {
@@ -50,14 +54,13 @@ func (ctl ConversationController) Show(c *gin.Context) {
 		return
 	}
 
-	// 路径参数统一在 controller 解析，model 层只接收明确的 int64 ID。
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
+	var req ConversationIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
-	conversation, err := models.GetConversationDetail(user.ID, conversationID)
+	conversation, err := models.GetConversationDetail(user.ID, req.ConversationID)
 	if err != nil {
 		writeConversationError(c, err)
 		return
@@ -114,14 +117,6 @@ func currentUserOrUnauthorized(c *gin.Context) (models.User, bool) {
 		return models.User{}, false
 	}
 	return user, true
-}
-
-func parseIDParam(c *gin.Context, name string) (int64, error) {
-	id, err := strconv.ParseInt(c.Param(name), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, errors.New("invalid id")
-	}
-	return id, nil
 }
 
 // writeConversationError 把 model 层领域错误翻译为 HTTP 状态码。

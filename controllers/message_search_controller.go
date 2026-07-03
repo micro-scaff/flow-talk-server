@@ -14,26 +14,35 @@ import (
 // 当前版本只做 MySQL 范围内的文本消息搜索，不引入独立搜索引擎。
 type MessageSearchController struct{}
 
+// SearchConversationMessagesRequest 是会话内消息搜索请求。
+type SearchConversationMessagesRequest struct {
+	ConversationID int64  `json:"conversation_id" binding:"required"`
+	Keyword        string `json:"keyword" binding:"required"`
+	Limit          int    `json:"limit"`
+}
+
+// SearchMyMessagesRequest 是当前用户全部消息搜索请求。
+type SearchMyMessagesRequest struct {
+	Keyword string `json:"keyword" binding:"required"`
+	Limit   int    `json:"limit"`
+}
+
 // SearchConversation 搜索指定会话内的文本消息。
 func (ctl MessageSearchController) SearchConversation(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
 		return
 	}
-	conversationID, err := parseIDParam(c, "conversation_id")
-	if err != nil {
-		responses.Error(c, http.StatusBadRequest, "参数校验失败")
-		return
-	}
-	limit, err := parseOptionalIntQuery(c, "limit")
-	if err != nil {
+
+	var req SearchConversationMessagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
-	// q 和 limit 都由 model 层做最终校验和归一化。
+	// keyword 和 limit 都由 model 层做最终校验和归一化。
 	// 会话内搜索必须先确认当前用户仍是 active 成员。
-	messages, err := models.SearchConversationMessages(user.ID, conversationID, c.Query("q"), limit)
+	messages, err := models.SearchConversationMessages(user.ID, req.ConversationID, req.Keyword, req.Limit)
 	if err != nil {
 		writeSearchError(c, err)
 		return
@@ -47,14 +56,15 @@ func (ctl MessageSearchController) SearchMine(c *gin.Context) {
 	if !ok {
 		return
 	}
-	limit, err := parseOptionalIntQuery(c, "limit")
-	if err != nil {
+
+	var req SearchMyMessagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 		return
 	}
 
 	// 全局搜索通过 conversation_members 过滤会话范围，确保不会扫到用户无权访问的消息。
-	messages, err := models.SearchMyMessages(user.ID, c.Query("q"), limit)
+	messages, err := models.SearchMyMessages(user.ID, req.Keyword, req.Limit)
 	if err != nil {
 		writeSearchError(c, err)
 		return

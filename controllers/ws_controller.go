@@ -192,13 +192,6 @@ func DeliverMessageToLocalHub(hub *models.WSHub, event models.MessageDeliverEven
 
 	deliverEvent := models.NewWSEvent(models.WSEventMessageDeliver, "", event.Message)
 	hub.BroadcastEventToUsers(event.UserIDs, deliverEvent)
-
-	// v7 回执能力存在后，只有实际完成本机投递的在线用户才标记 delivered。
-	for _, userID := range hub.OnlineUserIDs(event.UserIDs) {
-		if userID != event.Message.SenderID {
-			_ = models.MarkMessageDelivered(event.Message.ID, userID)
-		}
-	}
 }
 
 func publishMessageDeliver(bus models.RealtimeBus, hub *models.WSHub, event models.MessageDeliverEvent) error {

@@ -76,18 +76,18 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		conversations := api.Group("/conversations", middlewares.AuthRequired(cfg.JWT))
 		{
 			conversations.GET("", conversationController.Index)
-			conversations.GET("/:conversation_id", conversationController.Show)
+			conversations.POST("/detail", conversationController.Show)
 			conversations.POST("/direct", conversationController.CreateDirect)
 			conversations.POST("/groups", conversationController.CreateGroup)
-			conversations.PATCH("/:conversation_id", groupController.UpdateProfile)
-			conversations.POST("/:conversation_id/members", groupController.AddMembers)
-			conversations.DELETE("/:conversation_id/members/:user_id", groupController.RemoveMember)
-			conversations.POST("/:conversation_id/leave", groupController.Leave)
-			conversations.PATCH("/:conversation_id/members/:user_id/role", groupController.UpdateMemberRole)
-			conversations.POST("/:conversation_id/messages", messageController.Create)
-			conversations.GET("/:conversation_id/messages", messageController.Index)
-			conversations.GET("/:conversation_id/messages/search", searchController.SearchConversation)
-			conversations.POST("/:conversation_id/read", messageController.MarkRead)
+			conversations.PATCH("/profile", groupController.UpdateProfile)
+			conversations.POST("/members", groupController.AddMembers)
+			conversations.DELETE("/members", groupController.RemoveMember)
+			conversations.POST("/leave", groupController.Leave)
+			conversations.PATCH("/members/role", groupController.UpdateMemberRole)
+			conversations.POST("/messages", messageController.Create)
+			conversations.POST("/messages/list", messageController.Index)
+			conversations.POST("/messages/search", searchController.SearchConversation)
+			conversations.POST("/read", messageController.MarkRead)
 		}
 
 		devices := api.Group("/devices", middlewares.AuthRequired(cfg.JWT))
@@ -99,17 +99,15 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 
 		messages := api.Group("/messages", middlewares.AuthRequired(cfg.JWT))
 		{
-			messages.GET("/search", searchController.SearchMine)
-			messages.PATCH("/:message_id/recall", messageController.Recall)
-			messages.PATCH("/:message_id/delete", messageController.Delete)
-			messages.GET("/:message_id/receipts", receiptController.Index)
-			messages.POST("/:message_id/delivered", receiptController.Delivered)
-			messages.POST("/:message_id/read", receiptController.Read)
+			messages.POST("/search", searchController.SearchMine)
+			messages.POST("/receipts", receiptController.Index)
+			messages.POST("/read", receiptController.Read)
+			messages.POST("/unread", receiptController.Unread)
 		}
 
 		users := api.Group("/users", middlewares.AuthRequired(cfg.JWT))
 		{
-			users.GET("/:user_id/presence", presenceController.Show)
+			users.POST("/presence", presenceController.Show)
 			users.POST("/presence/batch", presenceController.Batch)
 		}
 

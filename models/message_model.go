@@ -22,9 +22,6 @@ const (
 
 	// MessageStatusNormal 表示消息正常展示。
 	MessageStatusNormal = "normal"
-	// MessageStatusRecalled / MessageStatusDeleted 预留给 v6 消息状态能力。
-	MessageStatusRecalled = "recalled"
-	MessageStatusDeleted  = "deleted"
 )
 
 const (
@@ -43,8 +40,6 @@ var (
 	ErrMessageForbidden = errors.New("无权操作该消息")
 	// ErrReadCursorInvalid 表示已读游标不属于当前会话。
 	ErrReadCursorInvalid = errors.New("无效已读游标")
-	// ErrInvalidMessageStatus 表示当前消息状态不允许继续执行该操作。
-	ErrInvalidMessageStatus = errors.New("无效消息状态")
 )
 
 // Message 映射 messages 表。所有单聊和群聊消息统一存在这里。
@@ -168,7 +163,7 @@ func ListMessages(userID int64, conversationID int64, beforeID int64, limit int)
 	pageLimit := normalizeMessagePageLimit(limit)
 	queryLimit := pageLimit + 1
 
-	query := DB.Where("conversation_id = ? AND status <> ?", conversationID, MessageStatusDeleted)
+	query := DB.Where("conversation_id = ? AND status = ?", conversationID, MessageStatusNormal)
 	if beforeID > 0 {
 		query = query.Where("id < ?", beforeID)
 	}
@@ -257,43 +252,6 @@ func FindMessageByID(messageID int64) (Message, error) {
 	return findMessageByIDWithDB(DB, messageID)
 }
 
-// RecallMessage 撤回消息。
-// 发送者可以撤回自己的消息；群主和管理员可以撤回群内其他成员消息。
-func RecallMessage(operatorID int64, messageID int64) (MessageDTO, error) {
-	// 这里只传入目标状态，统一的权限和状态校验放在 updateMessageStatus。
-	return updateMessageStatus(operatorID, messageID, MessageStatusRecalled)
-}
-
-// DeleteMessage 删除消息。
-// 当前版本的 deleted 是全局状态：被删除后不会再出现在历史消息列表中。
-func DeleteMessage(operatorID int64, messageID int64) (MessageDTO, error) {
-	// 删除和撤回使用同一套权限矩阵：本人可操作自己的消息，群主/管理员可操作群内消息。
-	return updateMessageStatus(operatorID, messageID, MessageStatusDeleted)
-}
-
-// CanManageMessage 判断用户是否可以管理某条消息。
-// 这里不区分撤回和删除的权限矩阵，二者都遵循 v6 文档中的同一套规则。
-func CanManageMessage(operatorID int64, message Message) (bool, error) {
-	// 先确认操作者仍在消息所属会话中。
-	// 如果已经退出或被移除，即使曾经发送过消息，也不能再管理当前会话内容。
-	member, err := EnsureActiveMember(operatorID, message.ConversationID)
-	if err != nil {
-		if errors.Is(err, ErrConversationForbidden) {
-			return false, ErrMessageForbidden
-		}
-		return false, err
-	}
-	if message.SenderID == operatorID {
-		return true, nil
-	}
-	// v6 权限矩阵规定 owner/admin 可以撤回或删除他人消息。
-	// 单聊成员没有 owner/admin 角色，因此只能管理自己的消息。
-	if member.Role == MemberRoleOwner || member.Role == MemberRoleAdmin {
-		return true, nil
-	}
-	return false, nil
-}
-
 // EnsureMessageAccess 复用会话 active 成员校验，并把错误转换到消息领域。
 func EnsureMessageAccess(userID int64, conversationID int64) error {
 	if _, err := EnsureActiveMember(userID, conversationID); err != nil {
@@ -305,61 +263,15 @@ func EnsureMessageAccess(userID int64, conversationID int64) error {
 	return nil
 }
 
-func updateMessageStatus(operatorID int64, messageID int64, status string) (MessageDTO, error) {
-	if status != MessageStatusRecalled && status != MessageStatusDeleted {
-		return MessageDTO{}, ErrInvalidMessageStatus
-	}
-
-	var saved Message
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		// 先在事务内读取消息，保证后续状态更新基于同一条记录。
-		message, err := findMessageByIDWithDB(tx, messageID)
-		if err != nil {
-			return err
-		}
-		// deleted 是终态，避免已经从历史列表隐藏的消息再被撤回或重复删除。
-		if message.Status == MessageStatusDeleted {
-			return ErrInvalidMessageStatus
-		}
-
-		// 权限检查使用统一入口，避免 Recall/Delete 分别维护两套规则。
-		canManage, err := CanManageMessage(operatorID, message)
-		if err != nil {
-			return err
-		}
-		if !canManage {
-			return ErrMessageForbidden
-		}
-
-		// 这里只更新 status，不改 content。
-		// DTO 输出 recalled 时会把 content 置空，保留数据库原文便于审计或后续扩展。
-		if err := tx.Model(&message).Update("status", status).Error; err != nil {
-			return err
-		}
-		message.Status = status
-		saved = message
-		return nil
-	})
-	if err != nil {
-		return MessageDTO{}, fmt.Errorf("更新消息状态失败: %w", err)
-	}
-	return saved.ToDTO(), nil
-}
-
 // ToDTO 把消息数据库模型转换成接口输出模型。
-// recalled 状态下不返回原始 content，避免撤回后客户端仍能直接读取正文。
 func (m Message) ToDTO() MessageDTO {
-	content := m.Content
-	if m.Status == MessageStatusRecalled {
-		content = json.RawMessage(`{}`)
-	}
 	return MessageDTO{
 		ID:             m.ID,
 		ConversationID: m.ConversationID,
 		SenderID:       m.SenderID,
 		ClientMsgID:    m.ClientMsgID,
 		MessageType:    m.MessageType,
-		Content:        content,
+		Content:        m.Content,
 		Status:         m.Status,
 		SentAt:         m.SentAt.Format(time.RFC3339),
 	}

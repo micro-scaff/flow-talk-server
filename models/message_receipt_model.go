@@ -5,20 +5,19 @@ import (
 	"fmt"
 	"time"
 
-	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 const (
-	MessageReceiptDelivered = "delivered"
-	MessageReceiptRead      = "read"
+	MessageReceiptUnread = "unread"
+	MessageReceiptRead   = "read"
 )
 
-// ErrInvalidReceiptStatus 表示回执状态不是 delivered/read。
+// ErrInvalidReceiptStatus 表示回执状态不是 unread/read。
 var ErrInvalidReceiptStatus = errors.New("无效回执状态")
 
 // MessageReceipt 映射 message_receipts 表。
-// 一条消息对一个用户最多一条回执，status 从 delivered 升级到 read。
+// 一条消息对一个用户最多一条回执，status 表示当前用户是否已读。
 type MessageReceipt struct {
 	ID        int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 	MessageID int64     `gorm:"column:message_id" json:"message_id"`
@@ -49,7 +48,7 @@ func (r MessageReceipt) ToDTO() MessageReceiptDTO {
 }
 
 func UpsertMessageReceipt(messageID int64, userID int64, status string) error {
-	if status != MessageReceiptDelivered && status != MessageReceiptRead {
+	if status != MessageReceiptUnread && status != MessageReceiptRead {
 		return ErrInvalidReceiptStatus
 	}
 
@@ -60,14 +59,14 @@ func UpsertMessageReceipt(messageID int64, userID int64, status string) error {
 		return err
 	}
 	// 只有消息所在会话的 active 成员才能写自己的回执。
-	// 这可以防止任意用户给陌生消息伪造 delivered/read 状态。
+	// 这可以防止任意用户给陌生消息伪造 read/unread 状态。
 	if err := EnsureMessageAccess(userID, message.ConversationID); err != nil {
 		return err
 	}
 
 	now := time.Now()
 	// message_id + user_id 有唯一索引，天然适合 upsert。
-	// 客户端重复上报 delivered/read 时，只更新时间和必要的状态升级。
+	// 客户端重复上报 read/unread 时，只更新时间和当前状态。
 	receipt := MessageReceipt{
 		MessageID: messageID,
 		UserID:    userID,
@@ -77,12 +76,7 @@ func UpsertMessageReceipt(messageID int64, userID int64, status string) error {
 
 	assignments := map[string]any{
 		"updated_at": now,
-	}
-	if status == MessageReceiptDelivered {
-		// read 包含 delivered 语义；如果已有 read，后续 delivered 不能降级。
-		assignments["status"] = gorm.Expr("IF(status = ?, status, ?)", MessageReceiptRead, MessageReceiptDelivered)
-	} else {
-		assignments["status"] = status
+		"status":     status,
 	}
 
 	err = DB.Clauses(clause.OnConflict{
@@ -95,14 +89,12 @@ func UpsertMessageReceipt(messageID int64, userID int64, status string) error {
 	return nil
 }
 
-func MarkMessageDelivered(messageID int64, userID int64) error {
-	// 语义包装方法，让 WebSocket 投递代码读起来更接近业务语言。
-	return UpsertMessageReceipt(messageID, userID, MessageReceiptDelivered)
+func MarkMessageRead(messageID int64, userID int64) error {
+	return UpsertMessageReceipt(messageID, userID, MessageReceiptRead)
 }
 
-func MarkMessageRead(messageID int64, userID int64) error {
-	// read 是比 delivered 更高的状态；UpsertMessageReceipt 会负责最终写入规则。
-	return UpsertMessageReceipt(messageID, userID, MessageReceiptRead)
+func MarkMessageUnread(messageID int64, userID int64) error {
+	return UpsertMessageReceipt(messageID, userID, MessageReceiptUnread)
 }
 
 func ListMessageReceipts(requestUserID int64, messageID int64) ([]MessageReceiptDTO, error) {
