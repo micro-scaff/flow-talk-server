@@ -22,9 +22,21 @@ vet:
 	$(GO_ENV) go vet ./...
 
 fresh:
-	@if [ ! -x "$(FRESH_BIN)" ]; then $(MAKE) install-fresh; fi
-	$(GO_ENV) $(FRESH_BIN)
+	@if [ -x "$(FRESH_BIN)" ]; then \
+		$(GO_ENV) "$(FRESH_BIN)"; \
+	elif command -v fresh >/dev/null 2>&1; then \
+		$(GO_ENV) fresh; \
+	else \
+		$(MAKE) install-fresh; \
+		$(GO_ENV) "$(FRESH_BIN)"; \
+	fi
 
 install-fresh:
-	mkdir -p $(GO_BIN_DIR)
-	$(GO_ENV) go install github.com/pilu/fresh@$(FRESH_VERSION)
+	@if [ -x "$(FRESH_BIN)" ]; then \
+		echo "fresh already installed at $(FRESH_BIN)"; \
+	elif command -v fresh >/dev/null 2>&1; then \
+		echo "fresh already available at $$(command -v fresh)"; \
+	else \
+		mkdir -p $(GO_BIN_DIR); \
+		$(GO_ENV) go install github.com/pilu/fresh@$(FRESH_VERSION); \
+	fi

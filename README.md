@@ -83,6 +83,8 @@ make tidy
 make install-fresh
 ```
 
+如果系统 PATH 中已经存在 `fresh`，`make fresh` 和 `make install-fresh` 会直接复用，不会重复下载。
+
 ## 启动项目
 
 普通启动：
