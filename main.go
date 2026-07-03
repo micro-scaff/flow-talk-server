@@ -36,9 +36,15 @@ func main() {
 	if err := models.InitDB(cfg.MySQL); err != nil {
 		log.Fatalf("初始化数据库失败: %v", err)
 	}
+	if err := models.InitRedis(cfg.Redis); err != nil {
+		log.Fatalf("初始化 Redis 失败: %v", err)
+	}
 	// 4. main 退出时关闭数据库连接池。
 	// 正常运行时这里一般只会在进程停止时触发。
 	defer func() {
+		if err := models.CloseRedis(); err != nil {
+			log.Printf("关闭 Redis 连接失败: %v", err)
+		}
 		if err := models.CloseDB(); err != nil {
 			log.Printf("关闭数据库连接失败: %v", err)
 		}

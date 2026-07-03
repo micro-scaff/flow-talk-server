@@ -23,8 +23,10 @@ const (
 
 // WSController 处理 WebSocket 建连和事件分发。
 type WSController struct {
-	JWT models.JWTConfig
-	Hub *models.WSHub
+	JWT             models.JWTConfig
+	Hub             *models.WSHub
+	Bus             models.RealtimeBus
+	PresenceTracker models.PresenceTracker
 }
 
 var wsUpgrader = websocket.Upgrader{
@@ -49,6 +51,7 @@ func (ctl WSController) Connect(c *gin.Context) {
 
 	wsConn := models.NewWSConnection(user.ID, strings.TrimSpace(c.Query("device_id")))
 	ctl.Hub.Add(wsConn)
+	_ = ctl.presenceTracker().AddConnection(wsConn)
 	if wsConn.DeviceID != "" {
 		// 设备表属于 v5 能力；这里忽略“不存在设备”的错误，让纯 WebSocket 调试不被设备上报流程阻塞。
 		_ = models.TouchUserDevice(user.ID, wsConn.DeviceID)
@@ -88,6 +91,7 @@ func (ctl WSController) readLoop(user models.User, socket *websocket.Conn, wsCon
 	defer func() {
 		// 任何读错误、客户端断开或服务端关闭都会走这里，确保 Hub 不保留脏连接。
 		ctl.Hub.Remove(wsConn.UserID, wsConn.ID)
+		_ = ctl.presenceTracker().RemoveConnection(wsConn)
 		_ = socket.Close()
 	}()
 
@@ -100,6 +104,7 @@ func (ctl WSController) readLoop(user models.User, socket *websocket.Conn, wsCon
 		}
 
 		ctl.Hub.Touch(wsConn.UserID, wsConn.ID)
+		_ = ctl.presenceTracker().TouchConnection(wsConn)
 		if wsConn.DeviceID != "" {
 			// 心跳或任意事件都可以视为设备活跃，用来支撑 v5 最近在线时间。
 			_ = models.TouchUserDevice(wsConn.UserID, wsConn.DeviceID)
@@ -164,13 +169,42 @@ func (ctl WSController) handleMessageSend(user models.User, event models.WSEvent
 		return
 	}
 
-	deliverEvent := models.NewWSEvent(models.WSEventMessageDeliver, "", message)
-	ctl.Hub.BroadcastEventToUsers(memberIDs, deliverEvent)
+	if err := ctl.publishMessageDeliver(models.MessageDeliverEvent{
+		UserIDs: memberIDs,
+		Message: message,
+	}); err != nil {
+		wsConn.SendEvent(models.NewWSErrorEvent(event.RequestID, "消息已保存，实时投递失败"))
+		return
+	}
+}
 
-	// v7 回执能力存在后，只有本机在线用户才标记 delivered。
-	for _, userID := range ctl.Hub.OnlineUserIDs(memberIDs) {
-		if userID != message.SenderID {
-			_ = models.MarkMessageDelivered(message.ID, userID)
+func (ctl WSController) publishMessageDeliver(event models.MessageDeliverEvent) error {
+	if ctl.Bus == nil {
+		DeliverMessageToLocalHub(ctl.Hub, event)
+		return nil
+	}
+	return ctl.Bus.PublishMessageDeliver(event)
+}
+
+func (ctl WSController) presenceTracker() models.PresenceTracker {
+	if ctl.PresenceTracker != nil {
+		return ctl.PresenceTracker
+	}
+	return models.NoopPresenceTracker{}
+}
+
+func DeliverMessageToLocalHub(hub *models.WSHub, event models.MessageDeliverEvent) {
+	if hub == nil {
+		return
+	}
+
+	deliverEvent := models.NewWSEvent(models.WSEventMessageDeliver, "", event.Message)
+	hub.BroadcastEventToUsers(event.UserIDs, deliverEvent)
+
+	// v7 回执能力存在后，只有实际完成本机投递的在线用户才标记 delivered。
+	for _, userID := range hub.OnlineUserIDs(event.UserIDs) {
+		if userID != event.Message.SenderID {
+			_ = models.MarkMessageDelivered(event.Message.ID, userID)
 		}
 	}
 }

@@ -3,9 +3,11 @@ package models
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gopkg.in/ini.v1"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -35,6 +37,8 @@ type AppConfig struct {
 	HTTP HTTPConfig
 	// JWT 保存 token 签名密钥和有效期。
 	JWT JWTConfig
+	// Redis 保存跨节点实时投递和在线状态配置。默认关闭，关闭时继续使用单进程内存实现。
+	Redis RedisConfig
 }
 
 // LogFields 返回适合启动日志打印的配置摘要。
@@ -57,6 +61,16 @@ func (cfg AppConfig) LogFields() map[string]any {
 		"jwt": map[string]any{
 			"secret": maskSecret(cfg.JWT.Secret),
 			"ttl":    cfg.JWT.TTL.String(),
+		},
+		"redis": map[string]any{
+			"enabled":      cfg.Redis.Enabled,
+			"addr":         cfg.Redis.Addr,
+			"password":     maskSecret(cfg.Redis.Password),
+			"db":           cfg.Redis.DB,
+			"key_prefix":   cfg.Redis.KeyPrefix,
+			"presence_ttl": cfg.Redis.PresenceTTL.String(),
+			"channel":      cfg.Redis.Channel,
+			"instance_id":  cfg.Redis.InstanceID,
 		},
 	}
 }
@@ -93,6 +107,18 @@ type JWTConfig struct {
 	TTL time.Duration
 }
 
+// RedisConfig 保存 Redis 连接和实时能力相关配置。
+type RedisConfig struct {
+	Enabled     bool
+	Addr        string
+	Password    string
+	DB          int
+	KeyPrefix   string
+	PresenceTTL time.Duration
+	Channel     string
+	InstanceID  string
+}
+
 // LoadConfig 使用 go-ini 从 conf/app.ini 读取配置。
 // 如果配置了 mysql.dsn，会优先使用完整 DSN；否则用 host/port/username/password/database 组装。
 func LoadConfig(path string) (AppConfig, error) {
@@ -112,6 +138,7 @@ func LoadConfig(path string) (AppConfig, error) {
 	mysqlSection := file.Section("mysql")
 	httpSection := file.Section("http")
 	jwtSection := file.Section("jwt")
+	redisSection := file.Section("redis")
 
 	// MustString / MustBool 用来提供默认值。
 	// strings.TrimSpace 可以避免配置里多写空格导致连接失败。
@@ -131,6 +158,15 @@ func LoadConfig(path string) (AppConfig, error) {
 		},
 		JWT: JWTConfig{
 			Secret: strings.TrimSpace(jwtSection.Key("secret").String()),
+		},
+		Redis: RedisConfig{
+			Enabled:    redisSection.Key("enabled").MustBool(false),
+			Addr:       strings.TrimSpace(redisSection.Key("addr").MustString("127.0.0.1:6379")),
+			Password:   strings.TrimSpace(redisSection.Key("password").String()),
+			DB:         redisSection.Key("db").MustInt(0),
+			KeyPrefix:  strings.TrimSpace(redisSection.Key("key_prefix").MustString("flow-talk")),
+			Channel:    strings.TrimSpace(redisSection.Key("channel").MustString("flow-talk:message_deliver")),
+			InstanceID: strings.TrimSpace(redisSection.Key("instance_id").String()),
 		},
 	}
 
@@ -159,6 +195,22 @@ func LoadConfig(path string) (AppConfig, error) {
 	}
 	if cfg.HTTP.Mode == "" {
 		cfg.HTTP.Mode = defaultGinMode
+	}
+	if cfg.Redis.Enabled && cfg.Redis.Addr == "" {
+		return AppConfig{}, fmt.Errorf("redis.addr 不能为空")
+	}
+	if cfg.Redis.KeyPrefix == "" {
+		cfg.Redis.KeyPrefix = "flow-talk"
+	}
+	if cfg.Redis.Channel == "" {
+		cfg.Redis.Channel = "flow-talk:message_deliver"
+	}
+	if cfg.Redis.InstanceID == "" {
+		cfg.Redis.InstanceID = defaultInstanceID()
+	}
+	cfg.Redis.PresenceTTL, err = time.ParseDuration(strings.TrimSpace(redisSection.Key("presence_ttl").MustString("90s")))
+	if err != nil || cfg.Redis.PresenceTTL <= 0 {
+		return AppConfig{}, fmt.Errorf("redis.presence_ttl 必须是有效的正数时间，例如 90s")
 	}
 
 	return cfg, nil
@@ -199,6 +251,14 @@ func maskDSN(value string) string {
 	return "******"
 }
 
+func defaultInstanceID() string {
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "unknown-host"
+	}
+	return fmt.Sprintf("%s-%d", hostname, os.Getpid())
+}
+
 // InitDB 创建并保存 GORM 数据库连接。
 // main 启动时调用一次；后续 models 包中的方法都复用这个连接池。
 func InitDB(cfg MySQLConfig) error {
@@ -222,6 +282,36 @@ func InitDB(cfg MySQLConfig) error {
 	// 保存到包级变量，models/user_model.go 里的查询方法会复用这个连接。
 	DB = db
 	return nil
+}
+
+// RedisClient 是全局 Redis 客户端。只有 redis.enabled=true 时才会初始化。
+var RedisClient *redis.Client
+
+// InitRedis 创建 Redis 连接并在启动期 Ping，尽早暴露配置问题。
+func InitRedis(cfg RedisConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+		DB:       cfg.DB,
+	})
+	if err := client.Ping(redisContext()).Err(); err != nil {
+		_ = client.Close()
+		return fmt.Errorf("Ping Redis 失败: %w", err)
+	}
+	RedisClient = client
+	return nil
+}
+
+// CloseRedis 关闭 Redis 连接池。
+func CloseRedis() error {
+	if RedisClient == nil {
+		return nil
+	}
+	return RedisClient.Close()
 }
 
 // CloseDB 关闭 GORM 底层连接池。

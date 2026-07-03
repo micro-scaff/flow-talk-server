@@ -1,6 +1,13 @@
 package models
 
-import "sync"
+import (
+	"encoding/json"
+	"log"
+	"strings"
+	"sync"
+
+	"github.com/redis/go-redis/v9"
+)
 
 // MessageDeliverEvent 是实时投递时传递的最小事件。
 // 当前项目采用单进程 Hub 投递；该结构用于让投递数据在代码内保持清晰边界。
@@ -47,5 +54,64 @@ func (b *MemoryRealtimeBus) SubscribeMessageDeliver(handler func(MessageDeliverE
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.handlers = append(b.handlers, handler)
+	return nil
+}
+
+// RedisRealtimeBus 使用 Redis Pub/Sub 分发跨节点实时投递事件。
+// 每个实例都订阅同一个 channel，收到事件后只投递自己本机 Hub 中存在的连接。
+type RedisRealtimeBus struct {
+	client  *redis.Client
+	channel string
+}
+
+func NewRedisRealtimeBus(client *redis.Client, channel string) *RedisRealtimeBus {
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		channel = "flow-talk:message_deliver"
+	}
+	return &RedisRealtimeBus{
+		client:  client,
+		channel: channel,
+	}
+}
+
+func (b *RedisRealtimeBus) PublishMessageDeliver(event MessageDeliverEvent) error {
+	if b == nil || b.client == nil {
+		return nil
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	return b.client.Publish(redisContext(), b.channel, payload).Err()
+}
+
+func (b *RedisRealtimeBus) SubscribeMessageDeliver(handler func(MessageDeliverEvent)) error {
+	if b == nil || b.client == nil || handler == nil {
+		return nil
+	}
+
+	pubsub := b.client.Subscribe(redisContext(), b.channel)
+	if _, err := pubsub.Receive(redisContext()); err != nil {
+		_ = pubsub.Close()
+		return err
+	}
+
+	go func() {
+		defer func() {
+			if err := pubsub.Close(); err != nil {
+				log.Printf("关闭 Redis 实时订阅失败: %v", err)
+			}
+		}()
+
+		for message := range pubsub.Channel() {
+			var event MessageDeliverEvent
+			if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
+				log.Printf("解析 Redis 实时投递事件失败: %v", err)
+				continue
+			}
+			handler(event)
+		}
+	}()
 	return nil
 }

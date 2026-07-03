@@ -97,7 +97,9 @@ HTTP / WebSocket
   -> MySQL / static 持久化数据和上传资源
 ```
 
-当前项目刻意保持轻量：不引入 Redis、MQ 或独立对象存储。WebSocket 在线连接保存在单进程内存中，上传资源先落到本地 `static` 目录，MySQL 负责核心业务数据持久化。
+当前项目默认保持轻量：不启用 Redis、MQ 或独立对象存储。WebSocket 在线连接和本机在线状态保存在单进程内存中，上传资源先落到本地 `static` 目录，MySQL 负责核心业务数据持久化。
+
+项目已支持可选 Redis。`conf/app.ini` 中 `redis.enabled=false` 时继续使用单进程内存 Hub；改为 `true` 后，Redis Pub/Sub 用于跨节点实时投递，Redis TTL key/ZSET 用于全局在线状态。真实 WebSocket 连接仍保存在各进程自己的 `WSHub` 中。
 
 ## 核心设计
 
@@ -145,7 +147,14 @@ WebSocket 连接由单进程 `WSHub` 管理。一个用户可以同时有多条�
 - 在线成员：通过本进程 WebSocket 连接实时投递
 - 慢连接：发送队列满时放弃本次实时投递
 - 离线成员：不实时投递，依靠历史消息、会话列表和未读数补齐
-- 多实例：暂未做跨节点投递，后续可在 `RealtimeBus` 边界外接 Redis Pub/Sub、MQ 或网关
+- 多实例：启用 Redis 后通过 `RealtimeBus` 发布 `message.deliver`，每个节点订阅后只投递自己的本机连接
+
+Redis 用于跨节点协同，但不替代本机 WebSocket 连接管理：
+
+- 本机 `WSHub`：继续保存真实 WebSocket 连接、发送队列和连接生命周期
+- Redis Pub/Sub：广播 `message.deliver` 等跨节点实时事件
+- Redis TTL key 或 ZSET：记录用户在线连接快照，支撑全局在线状态查询
+- MySQL：继续保存消息、会话、成员、回执等最终业务状态
 
 ## 数据模型
 
@@ -409,7 +418,8 @@ GET /ws?token={jwt}&device_id={device_id}
 - 创建会话、写入成员、发送消息、更新最后消息等复合操作必须使用事务。
 - 客户端必须生成稳定 `client_msg_id`，重试时复用同一个值。
 - 上传资源只保存到本地 `static`，生产环境应替换为对象存储或独立资源服务。
-- 当前在线状态只代表本进程视角，多实例部署前需要引入跨节点在线状态。
+- Redis 未启用时，在线状态只代表本进程视角，实时投递只覆盖本进程内连接。
+- 多实例部署时建议启用 Redis；如果需要可重放投递或更强消费确认，可继续演进到 Redis Streams、MQ 或独立 WebSocket 网关。
 - 当前未读数基于已读游标计算，数据量变大后可以再做缓存或冗余计数。
 - 当前本地密码保存方式只适合开发阶段，正式环境应迁移到哈希存储。
 
@@ -417,7 +427,7 @@ GET /ws?token={jwt}&device_id={device_id}
 
 - 密码哈希、登录限流、刷新 token、登出和 token 黑名单
 - 真实外部身份 provider，例如 OAuth、企业微信、内部统一登录
-- Redis/MQ 支撑多实例 WebSocket 投递和在线状态同步
+- Redis Streams、MQ 或独立网关支撑更强的多实例投递确认和消费追踪
 - 对象存储、资源鉴权、缩略图和视频转码
 - 消息全文搜索索引
 - 会话置顶、免打扰、草稿、多端同步

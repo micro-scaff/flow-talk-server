@@ -1,6 +1,8 @@
 package routers
 
 import (
+	"log"
+
 	"flow-talk/controllers"
 	"flow-talk/middlewares"
 	"flow-talk/models"
@@ -27,8 +29,27 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	// Hub 是当前进程内的 WebSocket 连接管理器。
 	// v4-v7 都围绕它实现单机实时投递和本机在线状态查询。
 	wsHub := models.NewWSHub()
-	wsController := controllers.WSController{JWT: cfg.JWT, Hub: wsHub}
-	presenceController := controllers.PresenceController{Hub: wsHub}
+	realtimeBus := models.RealtimeBus(models.NewMemoryRealtimeBus())
+	presenceProvider := models.PresenceProvider(models.NewHubPresenceProvider(wsHub))
+	presenceTracker := models.PresenceTracker(models.NoopPresenceTracker{})
+	if cfg.Redis.Enabled && models.RedisClient != nil {
+		realtimeBus = models.NewRedisRealtimeBus(models.RedisClient, cfg.Redis.Channel)
+		redisPresence := models.NewRedisPresenceStore(models.RedisClient, cfg.Redis)
+		presenceProvider = redisPresence
+		presenceTracker = redisPresence
+	}
+	if err := realtimeBus.SubscribeMessageDeliver(func(event models.MessageDeliverEvent) {
+		controllers.DeliverMessageToLocalHub(wsHub, event)
+	}); err != nil {
+		log.Printf("订阅实时投递事件失败: %v", err)
+	}
+	wsController := controllers.WSController{
+		JWT:             cfg.JWT,
+		Hub:             wsHub,
+		Bus:             realtimeBus,
+		PresenceTracker: presenceTracker,
+	}
+	presenceController := controllers.PresenceController{PresenceProvider: presenceProvider}
 
 	engine.GET("/ws", wsController.Connect)
 

@@ -11,9 +11,9 @@ import (
 )
 
 // PresenceController 处理在线状态查询。
-// 当前在线状态来自本进程 WSHub；last_seen_at 来自 user_devices，能兼容用户离线后的最近活跃时间。
+// 在线状态来源由 PresenceProvider 决定：默认本机 Hub，启用 Redis 后为全局 presence。
 type PresenceController struct {
-	Hub *models.WSHub
+	PresenceProvider models.PresenceProvider
 }
 
 // BatchPresenceRequest 是批量在线状态查询请求。
@@ -36,7 +36,7 @@ func (ctl PresenceController) Show(c *gin.Context) {
 		return
 	}
 
-	presence, err := models.GetUserPresence(ctl.Hub, userID)
+	presence, err := models.GetUserPresence(ctl.PresenceProvider, userID)
 	if err != nil {
 		writePresenceError(c, err)
 		return
@@ -56,7 +56,7 @@ func (ctl PresenceController) Batch(c *gin.Context) {
 		return
 	}
 
-	presences, err := models.BatchUserPresence(ctl.Hub, req.UserIDs)
+	presences, err := models.BatchUserPresence(ctl.PresenceProvider, req.UserIDs)
 	if err != nil {
 		writePresenceError(c, err)
 		return
