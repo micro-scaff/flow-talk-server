@@ -173,6 +173,8 @@ func (ctl MessageController) Delete(c *gin.Context) {
 	responses.Success(c, message, "删除消息成功")
 }
 
+// parseOptionalInt64Query 解析可选的 int64 query 参数。
+// 空值表示客户端没有传该参数，调用方通常用 0 触发 model 层默认逻辑。
 func parseOptionalInt64Query(c *gin.Context, name string) (int64, error) {
 	value := c.Query(name)
 	if value == "" {
@@ -185,6 +187,8 @@ func parseOptionalInt64Query(c *gin.Context, name string) (int64, error) {
 	return parsed, nil
 }
 
+// parseOptionalIntQuery 解析可选的 int query 参数。
+// 当前用于消息分页 limit，负数和非数字都会被视为参数错误。
 func parseOptionalIntQuery(c *gin.Context, name string) (int, error) {
 	value := c.Query(name)
 	if value == "" {

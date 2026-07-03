@@ -19,8 +19,13 @@ type PresenceTracker interface {
 
 type NoopPresenceTracker struct{}
 
-func (NoopPresenceTracker) AddConnection(conn *WSConnection) error    { return nil }
-func (NoopPresenceTracker) TouchConnection(conn *WSConnection) error  { return nil }
+// AddConnection 在内存模式下不需要额外记录连接状态。
+func (NoopPresenceTracker) AddConnection(conn *WSConnection) error { return nil }
+
+// TouchConnection 在内存模式下由 WSHub 自己维护 LastActiveAt。
+func (NoopPresenceTracker) TouchConnection(conn *WSConnection) error { return nil }
+
+// RemoveConnection 在内存模式下由 WSHub 删除连接即可。
 func (NoopPresenceTracker) RemoveConnection(conn *WSConnection) error { return nil }
 
 // RedisPresenceStore 使用 Redis TTL key 保存全局在线连接快照。
@@ -32,6 +37,8 @@ type RedisPresenceStore struct {
 	instanceID string
 }
 
+// NewRedisPresenceStore 创建 Redis 在线状态存储。
+// keyPrefix 会去掉末尾冒号，避免拼 key 时出现重复分隔符。
 func NewRedisPresenceStore(client *redis.Client, cfg RedisConfig) *RedisPresenceStore {
 	return &RedisPresenceStore{
 		client:     client,
@@ -41,14 +48,17 @@ func NewRedisPresenceStore(client *redis.Client, cfg RedisConfig) *RedisPresence
 	}
 }
 
+// AddConnection 记录一条新 WebSocket 连接，并设置 TTL。
 func (s *RedisPresenceStore) AddConnection(conn *WSConnection) error {
 	return s.writeConnection(conn)
 }
 
+// TouchConnection 刷新连接快照和 TTL，用于心跳或任意客户端事件。
 func (s *RedisPresenceStore) TouchConnection(conn *WSConnection) error {
 	return s.writeConnection(conn)
 }
 
+// RemoveConnection 删除连接快照，并从用户连接集合中移除该连接 ID。
 func (s *RedisPresenceStore) RemoveConnection(conn *WSConnection) error {
 	if s == nil || s.client == nil || conn == nil {
 		return nil
@@ -60,6 +70,8 @@ func (s *RedisPresenceStore) RemoveConnection(conn *WSConnection) error {
 	return s.client.ZRem(ctx, s.connectionsKey(conn.UserID), conn.ID).Err()
 }
 
+// Presence 汇总 Redis 中某个用户的连接快照。
+// 连接 hash 可能已经因为 TTL 过期，因此会顺手清理 ZSET 中的陈旧 connection_id。
 func (s *RedisPresenceStore) Presence(userID int64) (PresenceDTO, error) {
 	if userID <= 0 {
 		return PresenceDTO{}, ErrInvalidMember
@@ -108,6 +120,8 @@ func (s *RedisPresenceStore) Presence(userID int64) (PresenceDTO, error) {
 	}, nil
 }
 
+// BatchPresence 批量读取 Redis 在线状态。
+// 返回顺序遵循去重排序后的 userIDs，便于前端和测试稳定比对。
 func (s *RedisPresenceStore) BatchPresence(userIDs []int64) ([]PresenceDTO, error) {
 	userIDs = uniquePositiveIDs(userIDs)
 	if len(userIDs) == 0 {
@@ -125,6 +139,8 @@ func (s *RedisPresenceStore) BatchPresence(userIDs []int64) ([]PresenceDTO, erro
 	return result, nil
 }
 
+// writeConnection 写入或刷新单条连接快照。
+// hash 保存连接详情，ZSET 保存用户所有连接 ID 和最近活跃排序，两者配合完成在线状态聚合。
 func (s *RedisPresenceStore) writeConnection(conn *WSConnection) error {
 	if s == nil || s.client == nil || conn == nil {
 		return nil
@@ -157,10 +173,12 @@ func (s *RedisPresenceStore) writeConnection(conn *WSConnection) error {
 	return s.client.Expire(ctx, s.connectionsKey(conn.UserID), s.ttl*2).Err()
 }
 
+// connectionKey 是单条连接详情 hash 的 Redis key。
 func (s *RedisPresenceStore) connectionKey(userID int64, connectionID string) string {
 	return fmt.Sprintf("%s:presence:user:%d:conn:%s", s.keyPrefix, userID, connectionID)
 }
 
+// connectionsKey 是某个用户全部连接 ID 的 ZSET key。
 func (s *RedisPresenceStore) connectionsKey(userID int64) string {
 	return fmt.Sprintf("%s:presence:user:%d:connections", s.keyPrefix, userID)
 }

@@ -11,6 +11,7 @@ import (
 )
 
 var (
+	// ErrInvalidDevice 表示设备上报参数不合法，或当前用户没有可操作的设备记录。
 	ErrInvalidDevice = errors.New("无效设备")
 )
 
@@ -28,6 +29,8 @@ func (UserDevice) TableName() string {
 	return "user_devices"
 }
 
+// UserDeviceDTO 是设备接口返回给前端的结构。
+// Data 保留客户端原始 JSON，服务端只约束它必须是合法 JSON，不绑定具体设备字段。
 type UserDeviceDTO struct {
 	ID        int64           `json:"id"`
 	UserID    int64           `json:"user_id"`
@@ -35,6 +38,7 @@ type UserDeviceDTO struct {
 	UpdatedAt string          `json:"updated_at,omitempty"`
 }
 
+// ToDTO 把设备数据库模型转换成接口模型，并格式化最近活跃时间。
 func (d UserDevice) ToDTO() UserDeviceDTO {
 	return UserDeviceDTO{
 		ID:        d.ID,
@@ -79,6 +83,8 @@ func UpsertUserDevice(userID int64, data json.RawMessage) (UserDeviceDTO, error)
 	return saved.ToDTO(), nil
 }
 
+// ListUserDevices 查询当前用户的设备上报记录。
+// 目前数据库约束为一个用户一条设备记录，返回切片是为了给后续多设备模型保留接口形态。
 func ListUserDevices(userID int64) ([]UserDeviceDTO, error) {
 	if userID <= 0 {
 		return nil, ErrInvalidDevice
@@ -133,6 +139,8 @@ func TouchUserDevice(userID int64) error {
 	return nil
 }
 
+// LatestDeviceSeenAt 返回用户最近一次设备活跃时间。
+// 在线状态接口用它补充 last_seen_at；没有设备记录时返回 nil，不当作业务错误。
 func LatestDeviceSeenAt(userID int64) (*time.Time, error) {
 	if userID <= 0 {
 		return nil, ErrInvalidDevice
@@ -153,6 +161,8 @@ func LatestDeviceSeenAt(userID int64) (*time.Time, error) {
 	return &device.UpdatedAt, nil
 }
 
+// findUserDevice 根据用户 ID 查找设备记录。
+// Upsert 后会再查一次该记录，避免数据库 upsert 分支没有回填自增 ID。
 func findUserDevice(userID int64) (UserDevice, error) {
 	var device UserDevice
 	err := DB.Where("user_id = ?", userID).First(&device).Error

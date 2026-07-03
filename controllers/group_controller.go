@@ -33,6 +33,8 @@ type UpdateGroupProfileRequest struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
+// AddMembers 向群聊添加成员。
+// controller 只保证当前用户已登录和参数形状正确，角色权限、用户存在性和成员去重都交给 model 层。
 func (ctl GroupController) AddMembers(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
@@ -60,6 +62,8 @@ func (ctl GroupController) AddMembers(c *gin.Context) {
 	responses.Success(c, members, "添加群成员成功")
 }
 
+// RemoveMember 将目标用户从群聊中移除。
+// 路径里的 user_id 是被移除者，当前登录用户是操作者，二者权限关系由 model 层统一判断。
 func (ctl GroupController) RemoveMember(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
@@ -84,6 +88,8 @@ func (ctl GroupController) RemoveMember(c *gin.Context) {
 	responses.Success(c, nil, "移除群成员成功")
 }
 
+// Leave 让当前登录用户主动退出群聊。
+// 退出和被移除会写入不同 member status，便于后续做审计、提示或重新入群策略。
 func (ctl GroupController) Leave(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
@@ -104,6 +110,8 @@ func (ctl GroupController) Leave(c *gin.Context) {
 	responses.Success(c, nil, "退出群聊成功")
 }
 
+// UpdateMemberRole 修改群成员角色。
+// 当前只支持 owner 把成员设为 admin/member，不处理 owner 转让。
 func (ctl GroupController) UpdateMemberRole(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
@@ -135,6 +143,8 @@ func (ctl GroupController) UpdateMemberRole(c *gin.Context) {
 	responses.Success(c, member, "更新成员角色成功")
 }
 
+// UpdateProfile 修改群聊资料。
+// 路由复用 conversations/:conversation_id，因此 model 层仍会检查该会话必须是 group。
 func (ctl GroupController) UpdateProfile(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
 	if !ok {
@@ -161,6 +171,7 @@ func (ctl GroupController) UpdateProfile(c *gin.Context) {
 	responses.Success(c, conversation, "修改群资料成功")
 }
 
+// writeGroupError 把群管理领域错误翻译成 HTTP 响应。
 func writeGroupError(c *gin.Context, err error) {
 	// 这里把群管理领域错误转成对前端稳定的 HTTP 语义。
 	// 权限错误统一返回 403；“只能群聊使用”属于调用场景错误，返回 400。

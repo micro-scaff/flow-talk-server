@@ -29,10 +29,14 @@ type MemoryRealtimeBus struct {
 	handlers []func(MessageDeliverEvent)
 }
 
+// NewMemoryRealtimeBus 创建单进程内存事件总线。
+// 没有启用 Redis 时，路由初始化会使用它把消息投递事件转回本机 Hub。
 func NewMemoryRealtimeBus() *MemoryRealtimeBus {
 	return &MemoryRealtimeBus{}
 }
 
+// PublishMessageDeliver 发布一条消息投递事件。
+// 内存实现会同步调用所有订阅者；Redis 实现则发布到 Pub/Sub channel。
 func (b *MemoryRealtimeBus) PublishMessageDeliver(event MessageDeliverEvent) error {
 	// 先复制 handler 列表再调用，避免 handler 内部再次订阅时造成锁重入或长时间持锁。
 	b.mu.RLock()
@@ -46,6 +50,8 @@ func (b *MemoryRealtimeBus) PublishMessageDeliver(event MessageDeliverEvent) err
 	return nil
 }
 
+// SubscribeMessageDeliver 注册消息投递事件处理器。
+// 当前应用只注册一个处理器：把事件投递到本实例的 WebSocket Hub。
 func (b *MemoryRealtimeBus) SubscribeMessageDeliver(handler func(MessageDeliverEvent)) error {
 	// nil handler 没有业务意义，直接忽略，调用方不需要额外判空。
 	if handler == nil {
@@ -64,6 +70,8 @@ type RedisRealtimeBus struct {
 	channel string
 }
 
+// NewRedisRealtimeBus 创建 Redis Pub/Sub 实时总线。
+// channel 为空时使用默认频道，避免配置缺项导致实时投递静默失效。
 func NewRedisRealtimeBus(client *redis.Client, channel string) *RedisRealtimeBus {
 	channel = strings.TrimSpace(channel)
 	if channel == "" {
@@ -75,6 +83,8 @@ func NewRedisRealtimeBus(client *redis.Client, channel string) *RedisRealtimeBus
 	}
 }
 
+// PublishMessageDeliver 把消息投递事件序列化后发布到 Redis。
+// 所有实例都会收到该事件，但每个实例只会投递自己 Hub 里的本机连接。
 func (b *RedisRealtimeBus) PublishMessageDeliver(event MessageDeliverEvent) error {
 	if b == nil || b.client == nil {
 		return nil
@@ -86,6 +96,8 @@ func (b *RedisRealtimeBus) PublishMessageDeliver(event MessageDeliverEvent) erro
 	return b.client.Publish(redisContext(), b.channel, payload).Err()
 }
 
+// SubscribeMessageDeliver 订阅 Redis 实时投递频道。
+// 订阅成功后启动后台 goroutine 持续消费消息，避免阻塞路由初始化。
 func (b *RedisRealtimeBus) SubscribeMessageDeliver(handler func(MessageDeliverEvent)) error {
 	if b == nil || b.client == nil || handler == nil {
 		return nil

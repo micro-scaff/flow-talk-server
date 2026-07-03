@@ -64,6 +64,8 @@ func (Message) TableName() string {
 	return "messages"
 }
 
+// MessageDTO 是消息接口对外返回的结构。
+// 撤回消息会在 ToDTO 中清空 content，避免客户端继续展示原消息正文。
 type MessageDTO struct {
 	ID             int64           `json:"id"`
 	ConversationID int64           `json:"conversation_id"`
@@ -75,12 +77,16 @@ type MessageDTO struct {
 	SentAt         string          `json:"sent_at"`
 }
 
+// MessagePageDTO 是历史消息分页响应。
+// NextBeforeID 使用当前页最后一条消息 ID，客户端下一页传 before_id 即可继续向前翻。
 type MessagePageDTO struct {
 	Items        []MessageDTO `json:"items"`
 	NextBeforeID int64        `json:"next_before_id"`
 	HasMore      bool         `json:"has_more"`
 }
 
+// ReadStateDTO 是标记已读后的游标状态。
+// last_read_message_id 只会向前推进，不会因为客户端传较小 ID 而回退。
 type ReadStateDTO struct {
 	ConversationID    int64  `json:"conversation_id"`
 	LastReadMessageID int64  `json:"last_read_message_id"`
@@ -340,6 +346,8 @@ func updateMessageStatus(operatorID int64, messageID int64, status string) (Mess
 	return saved.ToDTO(), nil
 }
 
+// ToDTO 把消息数据库模型转换成接口输出模型。
+// recalled 状态下不返回原始 content，避免撤回后客户端仍能直接读取正文。
 func (m Message) ToDTO() MessageDTO {
 	content := m.Content
 	if m.Status == MessageStatusRecalled {
@@ -357,6 +365,8 @@ func (m Message) ToDTO() MessageDTO {
 	}
 }
 
+// validateMessageContent 按消息类型校验 content JSON。
+// 当前只允许客户端发送 text/image/file，system 留给服务端未来生成系统消息。
 func validateMessageContent(messageType string, content json.RawMessage) error {
 	if len(content) == 0 || !json.Valid(content) {
 		return ErrInvalidMessageContent
@@ -403,6 +413,8 @@ func validateMessageContent(messageType string, content json.RawMessage) error {
 	}
 }
 
+// normalizeMessagePageLimit 把分页 limit 归一到安全范围。
+// 未传或传 0 使用默认值，超过上限时截断，避免一次查询过多历史消息。
 func normalizeMessagePageLimit(limit int) int {
 	if limit <= 0 {
 		return defaultMessagePageLimit
@@ -413,6 +425,8 @@ func normalizeMessagePageLimit(limit int) int {
 	return limit
 }
 
+// findMessageByIDWithDB 在指定事务/连接中按主键查消息。
+// 传入 db 参数可以让发送、已读、撤回等事务复用同一个查询 helper。
 func findMessageByIDWithDB(db *gorm.DB, messageID int64) (Message, error) {
 	if messageID <= 0 {
 		return Message{}, ErrMessageNotFound
@@ -428,6 +442,8 @@ func findMessageByIDWithDB(db *gorm.DB, messageID int64) (Message, error) {
 	return message, nil
 }
 
+// findMessageByClientMsgIDWithDB 根据发送者和 client_msg_id 查找幂等消息。
+// client_msg_id 的唯一性只在同一个发送者范围内成立，不要求全局唯一。
 func findMessageByClientMsgIDWithDB(db *gorm.DB, senderID int64, clientMsgID string) (Message, error) {
 	var message Message
 	result := db.Where("sender_id = ? AND client_msg_id = ?", senderID, clientMsgID).Limit(1).Find(&message)
@@ -440,6 +456,8 @@ func findMessageByClientMsgIDWithDB(db *gorm.DB, senderID int64, clientMsgID str
 	return message, nil
 }
 
+// ensureActiveMemberWithDB 在消息领域校验 active 成员身份。
+// 与会话 helper 不同，这里会把无权限映射成 ErrMessageForbidden，方便 controller 返回消息领域文案。
 func ensureActiveMemberWithDB(db *gorm.DB, userID int64, conversationID int64) (ConversationMember, error) {
 	if userID <= 0 || conversationID <= 0 {
 		return ConversationMember{}, ErrInvalidMember

@@ -1,6 +1,6 @@
 # 项目总览
 
-`flow-talk-server` 是“流言”的后端服务，当前定位是一个可以本地独立运行的即时通讯服务。服务基于 Gin + GORM + MySQL，实现用户注册登录、会话、消息、资源上传、WebSocket 实时投递、在线状态和消息回执等基础能力。
+`flow-talk-server` 是“流言”的后端服务，当前定位是一个可以本地独立运行的即时通讯服务。服务基于 Gin + GORM + MySQL + Redis，实现用户注册登录、会话、消息、资源上传、WebSocket 实时投递、在线状态和消息回执等基础能力。
 
 运行、目录和本地环境配置请看 [README.md](../README.md)。本文档只说明项目目标、核心设计和主要业务流程。
 
@@ -20,7 +20,6 @@
 - 创建群聊会话
 - 查询当前用户会话列表
 - 查询单个会话详情
-- 使用 `conversation_members.status` 管理 active、left、removed 成员状态
 
 ### v3：消息与历史
 
@@ -39,7 +38,7 @@
 - `message.ack` 确认入库
 - `message.deliver` 向本机在线成员投递
 
-### v5：设备与离线同步
+### v5：设备与离线
 
 - 当前用户设备上报、查询和删除
 - WebSocket 建连或收到事件时刷新设备最近活跃时间
@@ -49,10 +48,8 @@
 ### v6：群管理与消息状态
 
 - 群聊添加成员、移除成员、退出群聊
-- 群主设置或取消管理员
-- 群主和管理员修改群资料
-- 消息撤回和删除
-- 基于 owner、admin、member 的群管理权限矩阵
+- 群主设置
+- 群主修改群资料
 
 ### v7：扩展能力
 
@@ -157,13 +154,13 @@ conversation_members
   会话成员、群角色、成员状态、已读游标
 
 messages
-  文本、图片、文件、系统消息，支持幂等发送、撤回、删除
+  文本、图片、文件、系统消息，支持幂等发送
 
 user_devices
   用户设备 JSON 数据、最近活跃时间
 
 message_receipts
-  单条消息的 delivered/read 回执
+  单条消息的 已读/未读 回执
 ```
 
 表关系：
@@ -200,10 +197,19 @@ GET    /api/conversations/:conversation_id
 POST   /api/conversations/direct
 POST   /api/conversations/groups
 PATCH  /api/conversations/:conversation_id
-POST   /api/conversations/:conversation_id/members
+POST   /api/conversations/members
 DELETE /api/conversations/:conversation_id/members/:user_id
 POST   /api/conversations/:conversation_id/leave
 PATCH  /api/conversations/:conversation_id/members/:user_id/role
+```
+
+添加群成员时，`conversation_id` 不放在 URL 路径中，统一放到请求 body：
+
+```json
+{
+  "conversation_id": 1,
+  "user_ids": [2, 3]
+}
 ```
 
 ### 消息

@@ -21,10 +21,13 @@ type HubPresenceProvider struct {
 	Hub *WSHub
 }
 
+// NewHubPresenceProvider 创建基于本机 Hub 的在线状态读取器。
 func NewHubPresenceProvider(hub *WSHub) HubPresenceProvider {
 	return HubPresenceProvider{Hub: hub}
 }
 
+// Presence 查询单个用户在当前进程内的在线状态。
+// Hub 为空时返回离线状态，方便测试或未初始化实时模块时安全降级。
 func (p HubPresenceProvider) Presence(userID int64) (PresenceDTO, error) {
 	if p.Hub == nil {
 		return PresenceDTO{UserID: userID}, nil
@@ -32,6 +35,8 @@ func (p HubPresenceProvider) Presence(userID int64) (PresenceDTO, error) {
 	return p.Hub.LocalPresence(userID), nil
 }
 
+// BatchPresence 批量查询本机 Hub 中的在线状态。
+// 这里会复用 uniquePositiveIDs 去重和排序，避免同一个用户重复出现在响应里。
 func (p HubPresenceProvider) BatchPresence(userIDs []int64) ([]PresenceDTO, error) {
 	userIDs = uniquePositiveIDs(userIDs)
 	if len(userIDs) == 0 {

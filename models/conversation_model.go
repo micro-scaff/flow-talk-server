@@ -184,6 +184,8 @@ func GetOrCreateDirectConversation(userID int64, targetUserID int64) (Conversati
 	return GetConversationDetail(userID, conversation.ID)
 }
 
+// createDirectConversation 在事务中创建单聊会话和双方成员记录。
+// 调用前必须已经生成 directKey 并校验双方用户存在。
 func createDirectConversation(userID int64, targetUserID int64, directKey string) (Conversation, error) {
 	conversation := Conversation{
 		Type:      ConversationTypeDirect,
@@ -430,6 +432,8 @@ func AddGroupMembers(operatorID int64, conversationID int64, userIDs []int64) ([
 	return result, nil
 }
 
+// RemoveGroupMember 把目标成员标记为 removed。
+// 它不会物理删除成员记录，避免历史消息、权限审计和后续重新入群丢失上下文。
 func RemoveGroupMember(operatorID int64, conversationID int64, targetUserID int64) error {
 	if targetUserID <= 0 {
 		return ErrInvalidMember
@@ -462,6 +466,8 @@ func RemoveGroupMember(operatorID int64, conversationID int64, targetUserID int6
 	return nil
 }
 
+// LeaveGroup 把当前成员标记为 left。
+// 群主不能直接退出，因为 conversations.owner_id 必须始终指向一个 active owner。
 func LeaveGroup(userID int64, conversationID int64) error {
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
@@ -483,6 +489,8 @@ func LeaveGroup(userID int64, conversationID int64) error {
 	return nil
 }
 
+// UpdateMemberRole 更新群成员角色。
+// 当前只允许群主把普通成员提升为管理员，或把管理员降为普通成员。
 func UpdateMemberRole(operatorID int64, conversationID int64, targetUserID int64, role string) (ConversationMemberDTO, error) {
 	role = strings.TrimSpace(role)
 	// 当前接口只允许 owner 在 admin/member 之间切换。
@@ -524,6 +532,8 @@ func UpdateMemberRole(operatorID int64, conversationID int64, targetUserID int64
 	return updated.ToDTO(), nil
 }
 
+// UpdateGroupProfile 修改群名称和头像。
+// 只有群主和管理员可以修改，普通成员只能读取群资料。
 func UpdateGroupProfile(operatorID int64, conversationID int64, title string, avatarURL string) (ConversationDTO, error) {
 	// 群名称是展示和搜索的重要字段，不允许空白字符串。
 	title = strings.TrimSpace(title)
@@ -684,6 +694,8 @@ func findOptionalLastMessage(lastMessageID *int64) (*MessageDTO, error) {
 	return &dto, nil
 }
 
+// countUnreadMessages 根据成员的 last_read_message_id 计算未读数。
+// 自己发送的消息不计入未读，撤回/删除后的非 normal 消息也不计入未读。
 func countUnreadMessages(userID int64, conversationID int64) (int64, error) {
 	var count int64
 	err := DB.Table("messages AS m").
@@ -699,6 +711,8 @@ func countUnreadMessages(userID int64, conversationID int64) (int64, error) {
 	return count, nil
 }
 
+// buildDirectMembers 构建单聊双方成员记录。
+// 单聊没有管理员概念，两名成员都使用 member 角色。
 func buildDirectMembers(conversationID int64, userID int64, targetUserID int64) []ConversationMember {
 	now := time.Now()
 	return []ConversationMember{
@@ -707,6 +721,8 @@ func buildDirectMembers(conversationID int64, userID int64, targetUserID int64) 
 	}
 }
 
+// buildGroupMembers 根据成员 ID 列表构建群成员记录。
+// ownerID 对应的成员写 owner 角色，其它成员写普通 member 角色。
 func buildGroupMembers(conversationID int64, ownerID int64, memberIDs []int64) []ConversationMember {
 	now := time.Now()
 	members := make([]ConversationMember, 0, len(memberIDs))
@@ -744,6 +760,8 @@ func buildGroupMemberIDs(ownerID int64, memberIDs []int64) []int64 {
 	return result
 }
 
+// uniquePositiveIDs 去掉非正数和重复 ID，并按升序返回。
+// 稳定顺序可以让接口响应、测试断言和数据库写入顺序都更可预测。
 func uniquePositiveIDs(ids []int64) []int64 {
 	seen := map[int64]bool{}
 	result := make([]int64, 0, len(ids))
@@ -760,6 +778,8 @@ func uniquePositiveIDs(ids []int64) []int64 {
 	return result
 }
 
+// ensureGroupConversationWithDB 在指定事务/连接中确认会话是群聊。
+// 群管理事务内部使用它，避免事务外读取到的状态和事务内更新不一致。
 func ensureGroupConversationWithDB(db *gorm.DB, conversationID int64) (Conversation, error) {
 	if conversationID <= 0 {
 		return Conversation{}, ErrConversationNotFound
@@ -778,6 +798,8 @@ func ensureGroupConversationWithDB(db *gorm.DB, conversationID int64) (Conversat
 	return conversation, nil
 }
 
+// ensureActiveMemberWithConversationDB 在指定事务/连接中确认用户是 active 成员。
+// 该 helper 属于会话领域，因此找不到成员时返回 ErrConversationForbidden。
 func ensureActiveMemberWithConversationDB(db *gorm.DB, userID int64, conversationID int64) (ConversationMember, error) {
 	if userID <= 0 || conversationID <= 0 {
 		return ConversationMember{}, ErrInvalidMember
@@ -793,6 +815,8 @@ func ensureActiveMemberWithConversationDB(db *gorm.DB, userID int64, conversatio
 	return member, nil
 }
 
+// findMemberWithDB 查询成员记录，不限制 status。
+// 添加成员时需要用它找回 left/removed 旧记录并重新激活。
 func findMemberWithDB(db *gorm.DB, conversationID int64, userID int64) (ConversationMember, error) {
 	if conversationID <= 0 || userID <= 0 {
 		return ConversationMember{}, ErrInvalidMember
