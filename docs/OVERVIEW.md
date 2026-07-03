@@ -45,7 +45,7 @@
 - 离线用户不依赖实时投递，上线后通过会话列表、未读数和历史消息补齐
 - 设备详情保存为客户端上报的 JSON，服务端不限制内部字段
 
-### v6：群管理与消息状态
+### v6：群管理
 
 - 群聊添加成员、移除成员、退出群聊
 - 群主设置
@@ -56,7 +56,7 @@
 - demo 外部身份登录，换取 IM JWT
 - 外部用户按 `external_id` 自动同步到 `users`
 - 单实例在线状态查询和批量查询
-- 单条消息 delivered/read 回执
+- 单条消息已读/未读回执
 - 会话内文本消息搜索
 - 当前用户全部 active 会话文本消息搜索
 
@@ -178,7 +178,7 @@ messages 1 - N message_receipts
 
 ## 接口分组
 
-实际路由以 [routers/router.go](../routers/router.go) 为准。
+本节描述目标接口设计；代码路由同步完成前，[routers/router.go](../routers/router.go) 仍代表当前实现。
 
 ### 认证
 
@@ -193,17 +193,37 @@ GET  /api/me
 
 ```text
 GET    /api/conversations
-GET    /api/conversations/:conversation_id
+POST   /api/conversations/detail
 POST   /api/conversations/direct
 POST   /api/conversations/groups
-PATCH  /api/conversations/:conversation_id
+PATCH  /api/conversations/profile
 POST   /api/conversations/members
-DELETE /api/conversations/:conversation_id/members/:user_id
-POST   /api/conversations/:conversation_id/leave
-PATCH  /api/conversations/:conversation_id/members/:user_id/role
+DELETE /api/conversations/members
+POST   /api/conversations/leave
+PATCH  /api/conversations/members/role
 ```
 
-添加群成员时，`conversation_id` 不放在 URL 路径中，统一放到请求 body：
+会话和群聊接口中，除列表、创建单聊、创建群聊外，业务 ID 统一放到请求 body，不放在 URL 路径中。
+
+查询会话详情：
+
+```json
+{
+  "conversation_id": 1
+}
+```
+
+修改群资料：
+
+```json
+{
+  "conversation_id": 1,
+  "title": "新群名",
+  "avatar_url": ""
+}
+```
+
+添加群成员：
 
 ```json
 {
@@ -212,16 +232,94 @@ PATCH  /api/conversations/:conversation_id/members/:user_id/role
 }
 ```
 
+移除群成员：
+
+```json
+{
+  "conversation_id": 1,
+  "user_id": 2
+}
+```
+
+退出群聊：
+
+```json
+{
+  "conversation_id": 1
+}
+```
+
+修改成员角色：
+
+```json
+{
+  "conversation_id": 1,
+  "user_id": 2,
+  "role": "admin"
+}
+```
+
 ### 消息
 
 ```text
-POST  /api/conversations/:conversation_id/messages
-GET   /api/conversations/:conversation_id/messages
-GET   /api/conversations/:conversation_id/messages/search
-POST  /api/conversations/:conversation_id/read
-GET   /api/messages/search
-PATCH /api/messages/:message_id/recall
-PATCH /api/messages/:message_id/delete
+POST  /api/conversations/messages
+POST  /api/conversations/messages/list
+POST  /api/conversations/messages/search
+POST  /api/conversations/read
+POST  /api/messages/search
+```
+
+消息接口中，`conversation_id`、`message_id` 等业务 ID 统一放到请求 body，不放在 URL 路径中。
+
+发送消息：
+
+```json
+{
+  "conversation_id": 1,
+  "client_msg_id": "client-001",
+  "message_type": "text",
+  "content": {
+    "text": "hello"
+  }
+}
+```
+
+分页拉取历史消息：
+
+```json
+{
+  "conversation_id": 1,
+  "before_id": 1001,
+  "limit": 20
+}
+```
+
+搜索会话内消息：
+
+```json
+{
+  "conversation_id": 1,
+  "keyword": "hello",
+  "limit": 20
+}
+```
+
+搜索当前用户全部消息：
+
+```json
+{
+  "keyword": "hello",
+  "limit": 20
+}
+```
+
+标记会话已读：
+
+```json
+{
+  "conversation_id": 1,
+  "last_read_message_id": 1001
+}
 ```
 
 ### 设备、在线状态和回执
@@ -230,11 +328,27 @@ PATCH /api/messages/:message_id/delete
 POST   /api/devices
 GET    /api/devices
 DELETE /api/devices
-GET    /api/users/:user_id/presence
+POST   /api/users/presence
 POST   /api/users/presence/batch
-GET    /api/messages/:message_id/receipts
-POST   /api/messages/:message_id/delivered
-POST   /api/messages/:message_id/read
+POST   /api/messages/receipts
+POST   /api/messages/read
+POST   /api/messages/unread
+```
+
+查询单个用户在线状态时，`user_id` 不放在 URL 路径中，统一放到请求 body：
+
+```json
+{
+  "user_id": 2
+}
+```
+
+消息回执接口中，`message_id` 不放在 URL 路径中，统一放到请求 body。当前只保留已读和未读两种状态。
+
+```json
+{
+  "message_id": 1001
+}
 ```
 
 ### 资源和调试
@@ -292,7 +406,7 @@ GET /api/ws?token={jwt}&device_id={device_id}
 
 ### 发送消息
 
-聊天页面发送消息首选 WebSocket `message.send`，这样发送确认和对端实时投递都走同一条长连接协议。HTTP `POST /api/conversations/:conversation_id/messages` 保留给调试、脚本、弱网降级和 WebSocket 不可用时的补偿发送。
+聊天页面发送消息首选 WebSocket `message.send`，这样发送确认和对端实时投递都走同一条长连接协议。HTTP `POST /api/conversations/messages` 保留给调试、脚本、弱网降级和 WebSocket 不可用时的补偿发送。
 
 客户端发送：
 
@@ -410,7 +524,7 @@ GET /api/ws?token={jwt}&device_id={device_id}
 
 ### 标记已读
 
-1. 客户端调用 `POST /api/conversations/:conversation_id/read`。
+1. 客户端调用 `POST /api/conversations/read`，在 body 中传入 `conversation_id` 和 `last_read_message_id`。
 2. 服务端校验当前用户是 active 成员。
 3. 服务端校验 `last_read_message_id` 属于当前会话。
 4. 只在新游标大于旧游标时更新 `conversation_members.last_read_message_id`。
