@@ -60,7 +60,7 @@ func (Message) TableName() string {
 }
 
 // MessageDTO 是消息接口对外返回的结构。
-// 撤回消息会在 ToDTO 中清空 content，避免客户端继续展示原消息正文。
+// 当前版本只返回正常消息，状态固定为 normal。
 type MessageDTO struct {
 	ID             int64           `json:"id"`
 	ConversationID int64           `json:"conversation_id"`
@@ -338,7 +338,7 @@ func normalizeMessagePageLimit(limit int) int {
 }
 
 // findMessageByIDWithDB 在指定事务/连接中按主键查消息。
-// 传入 db 参数可以让发送、已读、撤回等事务复用同一个查询 helper。
+// 传入 db 参数可以让发送、已读等事务复用同一个查询 helper。
 func findMessageByIDWithDB(db *gorm.DB, messageID int64) (Message, error) {
 	if messageID <= 0 {
 		return Message{}, ErrMessageNotFound

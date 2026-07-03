@@ -42,7 +42,7 @@
     },
     {
       "name": "消息回执",
-      "description": "逐条消息送达和已读回执"
+      "description": "逐条消息已读和未读回执"
     },
     {
       "name": "在线状态",
@@ -258,122 +258,6 @@
         }
       }
     },
-    "/api/conversations/{conversation_id}": {
-      "get": {
-        "tags": [
-          "会话"
-        ],
-        "summary": "获取会话详情",
-        "description": "返回单个会话详情和成员列表，只允许会话 active 成员访问。",
-        "operationId": "getConversationDetail",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "获取成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConversationDetailApiResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "群管理"
-        ],
-        "summary": "修改群资料",
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "description": "会话 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateGroupProfileRequest"
-              },
-              "example": {
-                "title": "新的群名称",
-                "avatar_url": ""
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "修改群资料成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Conversation"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "修改群资料成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
     "/api/conversations/direct": {
       "post": {
         "tags": [
@@ -470,209 +354,6 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/conversations/{conversation_id}/messages": {
-      "post": {
-        "tags": [
-          "消息"
-        ],
-        "summary": "发送消息（HTTP 降级接口）",
-        "description": "当前用户向指定会话发送消息，服务端写入 messages 并更新会话最后消息。聊天页面首选 WebSocket message.send；该 HTTP 接口主要用于接口调试、脚本发送、WebSocket 不可用时的降级发送和离线补偿场景。客户端降级时应复用同一个 client_msg_id，避免重复消息。",
-        "operationId": "sendMessage",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SendMessageRequest"
-              },
-              "example": {
-                "client_msg_id": "client-001",
-                "message_type": "text",
-                "content": {
-                  "text": "hello"
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "发送成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageApiResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      },
-      "get": {
-        "tags": [
-          "消息"
-        ],
-        "summary": "获取历史消息",
-        "description": "分页拉取指定会话的历史消息。",
-        "operationId": "listMessages",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "before_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "maximum": 100
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "获取成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessagePageApiResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/conversations/{conversation_id}/read": {
-      "post": {
-        "tags": [
-          "消息"
-        ],
-        "summary": "标记会话已读",
-        "description": "更新当前用户在指定会话中的 last_read_message_id。",
-        "operationId": "markConversationRead",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MarkReadRequest"
-              },
-              "example": {
-                "last_read_message_id": 1001
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "标记成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReadStateApiResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -963,290 +644,12 @@
         }
       }
     },
-    "/api/conversations/{conversation_id}/members": {
-      "post": {
-        "tags": [
-          "群管理"
-        ],
-        "summary": "添加群成员",
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "description": "会话 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddMembersRequest"
-              },
-              "example": {
-                "user_ids": [
-                  2,
-                  3
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "添加群成员成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ConversationMember"
-                      }
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "添加群成员成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/conversations/{conversation_id}/members/{user_id}": {
-      "delete": {
-        "tags": [
-          "群管理"
-        ],
-        "summary": "移除群成员",
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "description": "会话 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "description": "用户 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "移除群成员成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "nullable": true,
-                      "example": null
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "移除群成员成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/conversations/{conversation_id}/leave": {
-      "post": {
-        "tags": [
-          "群管理"
-        ],
-        "summary": "退出群聊",
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "description": "会话 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "退出群聊成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "nullable": true,
-                      "example": null
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "退出群聊成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/conversations/{conversation_id}/members/{user_id}/role": {
-      "patch": {
-        "tags": [
-          "群管理"
-        ],
-        "summary": "更新成员角色",
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "description": "会话 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "description": "用户 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateMemberRoleRequest"
-              },
-              "example": {
-                "role": "admin"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "更新成员角色成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ConversationMember"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "更新成员角色成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
     "/api/messages/search": {
-      "get": {
+      "post": {
         "tags": [
           "消息搜索"
         ],
         "summary": "搜索我的消息",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "maximum": 100
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "搜索消息成功",
@@ -1280,390 +683,23 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
-      }
-    },
-    "/api/conversations/{conversation_id}/messages/search": {
-      "get": {
-        "tags": [
-          "消息搜索"
-        ],
-        "summary": "搜索会话消息",
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "description": "会话 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "maximum": 100
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "搜索消息成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Message"
-                      }
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "搜索消息成功"
-                    }
-                  }
-                }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchMyMessagesRequest"
+              },
+              "example": {
+                "keyword": "hello",
+                "limit": 20
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
           }
-        }
-      }
-    },
-    "/api/messages/{message_id}/recall": {
-      "patch": {
-        "tags": [
-          "消息"
-        ],
-        "summary": "撤回消息",
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "description": "消息 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "撤回消息成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Message"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "撤回消息成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/messages/{message_id}/delete": {
-      "patch": {
-        "tags": [
-          "消息"
-        ],
-        "summary": "删除消息",
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "description": "消息 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "删除消息成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Message"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "删除消息成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/messages/{message_id}/receipts": {
-      "get": {
-        "tags": [
-          "消息回执"
-        ],
-        "summary": "获取消息回执",
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "description": "消息 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "获取消息回执成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/MessageReceipt"
-                      }
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "获取消息回执成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/messages/{message_id}/delivered": {
-      "post": {
-        "tags": [
-          "消息回执"
-        ],
-        "summary": "标记消息送达",
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "description": "消息 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "标记送达成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "nullable": true,
-                      "example": null
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "标记送达成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/messages/{message_id}/read": {
-      "post": {
-        "tags": [
-          "消息回执"
-        ],
-        "summary": "标记消息已读",
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "description": "消息 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "标记已读成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "nullable": true,
-                      "example": null
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "标记已读成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/api/users/{user_id}/presence": {
-      "get": {
-        "tags": [
-          "在线状态"
-        ],
-        "summary": "获取用户在线状态",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "description": "用户 ID",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "获取在线状态成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Presence"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "获取在线状态成功"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
+        },
+        "description": "通过请求体传入关键词，在当前用户可访问的消息中搜索。",
+        "operationId": "searchMyMessages"
       }
     },
     "/api/users/presence/batch": {
@@ -1721,7 +757,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "description": "通过请求体传入 user_ids，批量获取在线状态。"
       }
     },
     "/api/resources/upload": {
@@ -1794,6 +831,793 @@
             "$ref": "#/components/responses/InternalError"
           }
         }
+      }
+    },
+    "/api/conversations/detail": {
+      "post": {
+        "tags": [
+          "会话"
+        ],
+        "summary": "获取会话详情",
+        "description": "通过请求体传入会话 ID，返回单个会话详情和成员列表。",
+        "operationId": "getConversationDetail",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "获取成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDetailApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationIDRequest"
+              },
+              "example": {
+                "conversation_id": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/profile": {
+      "patch": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "修改群资料",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGroupProfileRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "title": "新的群名称",
+                "avatar_url": "https://example.com/group.png"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改群资料成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Conversation"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "修改群资料成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "description": "通过请求体传入会话 ID 和群资料字段，仅群主或管理员可操作。",
+        "operationId": "updateGroupProfile"
+      }
+    },
+    "/api/conversations/members": {
+      "post": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "邀请成员加入群聊",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMembersRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "user_ids": [
+                  2,
+                  3
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "添加群成员成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConversationMember"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "添加群成员成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "description": "通过请求体传入会话 ID 和用户 ID 列表。",
+        "operationId": "addGroupMembers"
+      },
+      "delete": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "移除群成员",
+        "responses": {
+          "200": {
+            "description": "移除群成员成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "移除群成员成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveMemberRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "user_id": 2
+              }
+            }
+          }
+        },
+        "description": "通过请求体传入会话 ID 和待移除用户 ID。",
+        "operationId": "removeGroupMember"
+      }
+    },
+    "/api/conversations/leave": {
+      "post": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "退出群聊",
+        "responses": {
+          "200": {
+            "description": "退出群聊成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "退出群聊成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationIDRequest"
+              },
+              "example": {
+                "conversation_id": 1
+              }
+            }
+          }
+        },
+        "description": "通过请求体传入会话 ID，当前用户退出群聊。",
+        "operationId": "leaveGroup"
+      }
+    },
+    "/api/conversations/members/role": {
+      "patch": {
+        "tags": [
+          "群管理"
+        ],
+        "summary": "修改群成员角色",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemberRoleRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "user_id": 2,
+                "role": "admin"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新成员角色成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ConversationMember"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "更新成员角色成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "description": "通过请求体传入会话 ID、成员用户 ID 和新角色。",
+        "operationId": "updateMemberRole"
+      }
+    },
+    "/api/conversations/messages": {
+      "post": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "发送消息（HTTP 降级接口）",
+        "description": "通过请求体传入会话 ID 和消息内容。聊天页面首选 WebSocket message.send；HTTP 接口用于调试、降级发送和离线补偿。客户端降级时应复用同一个 client_msg_id，避免重复消息。",
+        "operationId": "sendMessage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "client_msg_id": "client-001",
+                "message_type": "text",
+                "content": {
+                  "text": "hello"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "发送成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/conversations/messages/list": {
+      "post": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "获取历史消息",
+        "description": "通过请求体传入会话 ID 和分页参数，分页拉取指定会话的历史消息。",
+        "operationId": "listMessages",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "获取成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListMessagesRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "before_id": 1001,
+                "limit": 20
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/messages/search": {
+      "post": {
+        "tags": [
+          "消息搜索"
+        ],
+        "summary": "搜索指定会话消息",
+        "responses": {
+          "200": {
+            "description": "搜索消息成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "搜索消息成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchConversationMessagesRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "keyword": "hello",
+                "limit": 20
+              }
+            }
+          }
+        },
+        "description": "通过请求体传入会话 ID 和关键词，仅在指定会话内搜索消息。",
+        "operationId": "searchConversationMessages"
+      }
+    },
+    "/api/conversations/read": {
+      "post": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "更新会话已读位置",
+        "description": "通过请求体传入会话 ID 和最后已读消息 ID，用于更新当前用户在会话内的已读位置。",
+        "operationId": "markConversationRead",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              },
+              "example": {
+                "conversation_id": 1,
+                "last_read_message_id": 1001
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "标记成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadStateApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/messages/receipts": {
+      "post": {
+        "tags": [
+          "消息回执"
+        ],
+        "summary": "获取消息回执",
+        "responses": {
+          "200": {
+            "description": "获取消息回执成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MessageReceipt"
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "获取消息回执成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReceiptRequest"
+              },
+              "example": {
+                "message_id": 1001
+              }
+            }
+          }
+        },
+        "description": "通过请求体传入消息 ID，获取该消息的成员已读/未读回执。",
+        "operationId": "listMessageReceipts"
+      }
+    },
+    "/api/messages/read": {
+      "post": {
+        "tags": [
+          "消息回执"
+        ],
+        "summary": "标记消息已读",
+        "responses": {
+          "200": {
+            "description": "标记已读成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "标记已读成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReceiptRequest"
+              },
+              "example": {
+                "message_id": 1001
+              }
+            }
+          }
+        },
+        "description": "通过请求体传入消息 ID，将当前用户对该消息的回执标记为 read。",
+        "operationId": "markMessageRead"
+      }
+    },
+    "/api/messages/unread": {
+      "post": {
+        "tags": [
+          "消息回执"
+        ],
+        "summary": "标记消息未读",
+        "responses": {
+          "200": {
+            "description": "标记未读成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "标记未读成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReceiptRequest"
+              },
+              "example": {
+                "message_id": 1001
+              }
+            }
+          }
+        },
+        "description": "通过请求体传入消息 ID，将当前用户对该消息的回执标记为 unread。",
+        "operationId": "markMessageUnread"
+      }
+    },
+    "/api/users/presence": {
+      "post": {
+        "tags": [
+          "在线状态"
+        ],
+        "summary": "获取用户在线状态",
+        "responses": {
+          "200": {
+            "description": "获取在线状态成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Presence"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "获取在线状态成功"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresenceRequest"
+              },
+              "example": {
+                "user_id": 2
+              }
+            }
+          }
+        },
+        "description": "通过请求体传入用户 ID，获取单个用户在线状态。",
+        "operationId": "getUserPresence"
       }
     }
   },
@@ -2298,11 +2122,18 @@
       "SendMessageRequest": {
         "type": "object",
         "required": [
+          "conversation_id",
           "client_msg_id",
           "message_type",
           "content"
         ],
         "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
           "client_msg_id": {
             "type": "string",
             "description": "客户端生成的消息 ID，用于幂等去重",
@@ -2330,13 +2161,21 @@
       "MarkReadRequest": {
         "type": "object",
         "required": [
+          "conversation_id",
           "last_read_message_id"
         ],
         "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
           "last_read_message_id": {
             "type": "integer",
             "format": "int64",
-            "example": 1001
+            "example": 1001,
+            "description": "最后已读消息 ID"
           }
         }
       },
@@ -2374,7 +2213,11 @@
           },
           "status": {
             "type": "string",
-            "example": "normal"
+            "example": "normal",
+            "enum": [
+              "normal"
+            ],
+            "description": "消息状态；当前仅保留 normal"
           },
           "sent_at": {
             "type": "string",
@@ -2558,11 +2401,19 @@
       "AddMembersRequest": {
         "type": "object",
         "required": [
+          "conversation_id",
           "user_ids"
         ],
         "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
           "user_ids": {
             "type": "array",
+            "description": "待加入群聊的用户 ID 列表",
             "items": {
               "type": "integer",
               "format": "int64"
@@ -2577,12 +2428,28 @@
       "UpdateMemberRoleRequest": {
         "type": "object",
         "required": [
+          "conversation_id",
+          "user_id",
           "role"
         ],
         "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 2,
+            "description": "成员用户 ID"
+          },
           "role": {
             "type": "string",
+            "description": "成员角色",
             "enum": [
+              "owner",
               "admin",
               "member"
             ],
@@ -2593,9 +2460,16 @@
       "UpdateGroupProfileRequest": {
         "type": "object",
         "required": [
+          "conversation_id",
           "title"
         ],
         "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
           "title": {
             "type": "string",
             "example": "新的群名称"
@@ -2667,10 +2541,11 @@
           "status": {
             "type": "string",
             "enum": [
-              "delivered",
+              "unread",
               "read"
             ],
-            "example": "read"
+            "example": "read",
+            "description": "当前用户对消息的回执状态"
           },
           "updated_at": {
             "type": "string",
@@ -2692,6 +2567,143 @@
           "url": {
             "type": "string",
             "example": "/api/static/images/1/1780000000000.png"
+          }
+        }
+      },
+      "ConversationIDRequest": {
+        "type": "object",
+        "required": [
+          "conversation_id"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          }
+        }
+      },
+      "RemoveMemberRequest": {
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "user_id"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 2,
+            "description": "待移除用户 ID"
+          }
+        }
+      },
+      "ListMessagesRequest": {
+        "type": "object",
+        "required": [
+          "conversation_id"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
+          "before_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001,
+            "description": "向前分页游标，不传表示从最新消息开始"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "每页数量，最大 100",
+            "default": 20,
+            "maximum": 100,
+            "example": 20
+          }
+        }
+      },
+      "SearchConversationMessagesRequest": {
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "keyword"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1,
+            "description": "会话 ID"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "搜索关键词",
+            "example": "hello"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回数量，最大 100",
+            "default": 20,
+            "maximum": 100,
+            "example": 20
+          }
+        }
+      },
+      "SearchMyMessagesRequest": {
+        "type": "object",
+        "required": [
+          "keyword"
+        ],
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "搜索关键词",
+            "example": "hello"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回数量，最大 100",
+            "default": 20,
+            "maximum": 100,
+            "example": 20
+          }
+        }
+      },
+      "MessageReceiptRequest": {
+        "type": "object",
+        "required": [
+          "message_id"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001,
+            "description": "消息 ID"
+          }
+        }
+      },
+      "PresenceRequest": {
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 2,
+            "description": "用户 ID"
           }
         }
       }
