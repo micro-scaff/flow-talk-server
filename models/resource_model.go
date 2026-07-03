@@ -32,7 +32,7 @@ var (
 )
 
 // ResourceDTO 是资源上传成功后的返回结构。
-// URL 使用 /static 开头，和 main.go 中 engine.Static("/static", "./static") 的暴露路径保持一致。
+// URL 使用 /api/static 开头，和 main.go 中 engine.Static("/api/static", "./static") 的暴露路径保持一致。
 type ResourceDTO struct {
 	Type string `json:"type"`
 	URL  string `json:"url"`
@@ -75,7 +75,7 @@ func SaveUploadedResource(userID int64, resourceType string, header *multipart.F
 
 	return ResourceDTO{
 		Type: resourceType,
-		URL:  "/" + filepath.ToSlash(dstPath),
+		URL:  "/api/" + filepath.ToSlash(dstPath),
 	}, nil
 }
 

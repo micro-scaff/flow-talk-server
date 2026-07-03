@@ -108,7 +108,7 @@ http://localhost:8080
 WebSocket 入口：
 
 ```text
-ws://localhost:8080/ws
+ws://localhost:8080/api/ws
 ```
 
 ## 常用命令
@@ -137,11 +137,11 @@ POST /api/conversations/groups
 GET  /api/conversations/:conversation_id/messages
 POST /api/conversations/:conversation_id/messages  HTTP 降级发送
 POST /api/resources/upload
-GET  /admin/users
-GET  /ws
+GET  /api/admin/users
+GET  /api/ws
 ```
 
-聊天页面发送消息首选 WebSocket `/ws` 的 `message.send` 事件；HTTP 发送接口主要用于调试、脚本和 WebSocket 不可用时的降级。
+聊天页面发送消息首选 WebSocket `/api/ws` 的 `message.send` 事件；HTTP 发送接口主要用于调试、脚本和 WebSocket 不可用时的降级。
 
 完整接口以路由文件 [routers/router.go](./routers/router.go)、[docs/openapi.json](./docs/openapi.json) 和 [前端对接文档](./docs/前端对接文档.md) 为准。
 

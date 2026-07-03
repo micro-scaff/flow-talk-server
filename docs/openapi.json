@@ -680,7 +680,7 @@
         }
       }
     },
-    "/admin/users": {
+    "/api/admin/users": {
       "get": {
         "tags": [
           "用户"
@@ -735,13 +735,13 @@
         }
       }
     },
-    "/ws": {
+    "/api/ws": {
       "get": {
         "tags": [
           "WebSocket"
         ],
         "summary": "建立 WebSocket 连接",
-        "description": "地址格式：GET /ws?token={jwt}&device_id={device_id}。事件格式统一为 {type, request_id, payload}，支持 ping、message.send、message.ack、message.deliver、error。聊天页面发送消息应优先使用 message.send，不要同时调用 HTTP 发送接口。客户端发送前生成稳定 client_msg_id，本地插入 sending 消息；收到 message.ack 后用 ack.payload.client_msg_id 或 ack.payload.id 替换本地消息；收到 message.deliver 后按 id 去重，当前会话追加到消息列表，非当前会话刷新会话列表。WebSocket 不可用或 ack 超时时，可以使用同一个 client_msg_id 调用 HTTP 发送接口降级。",
+        "description": "地址格式：GET /api/ws?token={jwt}&device_id={device_id}。事件格式统一为 {type, request_id, payload}，支持 ping、message.send、message.ack、message.deliver、error。聊天页面发送消息应优先使用 message.send，不要同时调用 HTTP 发送接口。客户端发送前生成稳定 client_msg_id，本地插入 sending 消息；收到 message.ack 后用 ack.payload.client_msg_id 或 ack.payload.id 替换本地消息；收到 message.deliver 后按 id 去重，当前会话追加到消息列表，非当前会话刷新会话列表。WebSocket 不可用或 ack 超时时，可以使用同一个 client_msg_id 调用 HTTP 发送接口降级。",
         "parameters": [
           {
             "name": "token",
@@ -2704,7 +2704,7 @@
           },
           "url": {
             "type": "string",
-            "example": "/static/images/1/1780000000000.png"
+            "example": "/api/static/images/1/1780000000000.png"
           }
         }
       }

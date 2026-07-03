@@ -55,11 +55,11 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	}
 	presenceController := controllers.PresenceController{PresenceProvider: presenceProvider}
 
-	engine.GET("/ws", wsController.Connect)
-
 	// /api 放面向客户端的通用接口。
 	api := engine.Group("/api")
 	{
+		api.GET("/ws", wsController.Connect)
+
 		// /api/auth 下放认证相关接口。
 		// 注册和登录不需要 token，否则新用户无法进入系统。
 		auth := api.Group("/auth")
@@ -117,13 +117,13 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		{
 			resources.POST("/upload", resourceController.Upload)
 		}
-	}
 
-	// /admin 放后台或调试接口。
-	// 整个分组统一挂 AuthRequired，组内接口默认都需要登录。
-	admin := engine.Group("/admin", middlewares.AuthRequired(cfg.JWT))
-	{
-		// 获取所有用户信息，当前用于验证 GORM 查询和用户表映射。
-		admin.GET("/users", userController.Index)
+		// /api/admin 放后台或调试接口。
+		// 整个分组统一挂 AuthRequired，组内接口默认都需要登录。
+		admin := api.Group("/admin", middlewares.AuthRequired(cfg.JWT))
+		{
+			// 获取所有用户信息，当前用于验证 GORM 查询和用户表映射。
+			admin.GET("/users", userController.Index)
+		}
 	}
 }

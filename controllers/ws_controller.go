@@ -34,7 +34,7 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// Connect 处理 GET /ws?token={jwt}&device_id={device_id}。
+// Connect 处理 GET /api/ws?token={jwt}&device_id={device_id}。
 // WebSocket 无法稳定携带 Authorization 头，所以这里直接解析 query token。
 func (ctl WSController) Connect(c *gin.Context) {
 	// WebSocket 建连先鉴权再升级协议。
@@ -65,7 +65,7 @@ func (ctl WSController) Connect(c *gin.Context) {
 
 func (ctl WSController) userFromQueryToken(c *gin.Context) (models.User, bool) {
 	// WebSocket 客户端不一定方便设置 Authorization header。
-	// v4 约定 token 放在 query 中：/ws?token={jwt}&device_id={device_id}。
+	// v4 约定 token 放在 query 中：/api/ws?token={jwt}&device_id={device_id}。
 	token := strings.TrimSpace(c.Query("token"))
 	if token == "" {
 		c.AbortWithStatus(http.StatusUnauthorized)

@@ -11,7 +11,7 @@
 - 本地用户注册、登录和 JWT 签发
 - `Authorization: Bearer <token>` 鉴权
 - 根据 token 获取当前用户
-- `/admin/users` 调试用户列表
+- `/api/admin/users` 调试用户列表
 - `users.external_id` 和 `users.auth_source` 为外部身份预留字段
 
 ### v2：会话基础
@@ -33,7 +33,7 @@
 
 ### v4：实时通信
 
-- `/ws?token={jwt}&device_id={device_id}` WebSocket 建连鉴权
+- `/api/ws?token={jwt}&device_id={device_id}` WebSocket 建连鉴权
 - `ping` / `pong` 应用层心跳
 - WebSocket `message.send` 复用 v3 消息写入逻辑
 - `message.ack` 确认入库
@@ -235,8 +235,8 @@ POST   /api/messages/:message_id/read
 
 ```text
 POST /api/resources/upload
-GET  /admin/users
-GET  /ws
+GET  /api/admin/users
+GET  /api/ws
 ```
 
 除注册、登录和 WebSocket 建连前鉴权外，业务接口默认需要 JWT。
@@ -246,7 +246,7 @@ GET  /ws
 建连地址：
 
 ```text
-GET /ws?token={jwt}&device_id={device_id}
+GET /api/ws?token={jwt}&device_id={device_id}
 ```
 
 `token` 必填。`device_id` 可选，传入后服务端会刷新设备最近活跃时间。
@@ -373,7 +373,7 @@ GET /ws?token={jwt}&device_id={device_id}
 1. 客户端调用 `POST /api/auth/register` 创建用户。
 2. 客户端调用 `POST /api/auth/login` 获取 JWT。
 3. HTTP 接口通过 Authorization 传入 JWT。
-4. WebSocket 通过 `/ws?token={jwt}` 建连。
+4. WebSocket 通过 `/api/ws?token={jwt}` 建连。
 5. 服务端每次鉴权后都会查询用户状态，禁用用户不能继续访问。
 
 ### 外部身份登录
