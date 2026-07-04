@@ -2,5 +2,8 @@
   "go.alternateTools": {
     "go": "/Users/liyong/.goenv/shims/go"
   },
-  "go.goroot": ""
+  "go.goroot": "",
+  "go.toolsEnvVars": {
+    "GOPROXY": "https://goproxy.cn,direct"
+  }
 }
