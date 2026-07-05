@@ -11,7 +11,7 @@
 - 本地用户注册、登录和 JWT 签发
 - `Authorization: Bearer <token>` 鉴权
 - 根据 token 获取当前用户
-- `/api/admin/users` 调试用户列表
+- `/api/users?all=true` 读取全部用户列表
 - `users.external_id` 和 `users.auth_source` 为外部身份预留字段
 
 ### v2：会话基础
@@ -66,6 +66,7 @@
 - [docs/openapi.json](./openapi.json)：Apifox 可导入的 OpenAPI 文件
 - [接口文档生成](./接口文档生成.md)：接口文档维护方式
 - [前端对接文档](./前端对接文档.md)：前端项目生成和接口接入说明
+- [用户管理服务接入](./用户管理服务接入.md)：外部用户管理服务登录态换取 IM token 的接入方案
 - [数据库落地执行指南](./数据库/数据库落地执行指南.md)：本地 MySQL 建库建表步骤
 - [数据库表关系](./数据库/数据库表关系.md)：表关系和落地顺序
 - [图片、视频等资源存放](./图片、视频等资源存放.md)：上传资源约定
@@ -97,6 +98,8 @@ HTTP / WebSocket
 - `external_id`：把外部用户稳定映射到 IM 内部 `users.id`
 
 后续接企业登录、OAuth 或网关登录态时，消息、会话、群聊等业务仍只依赖内部 `users.id`。
+
+接入外部用户管理服务时，请看 [用户管理服务接入](./用户管理服务接入.md)。
 
 注意：当前本地用户密码仍用于打通开发流程，代码里也标记了后续应替换为 `password_hash`。
 
@@ -355,9 +358,11 @@ POST   /api/messages/unread
 
 ```text
 POST /api/resources/upload
-GET  /api/admin/users
+GET  /api/users?all=true
 GET  /api/ws
 ```
+
+用户列表支持查询参数：`all=true` 表示读取全部用户；不传 `all` 时可用 `limit`、`offset` 分页；`keyword` 可搜索用户名、昵称和外部 ID；`status`、`auth_source` 可按状态和来源过滤。
 
 除注册、登录和 WebSocket 建连前鉴权外，业务接口默认需要 JWT。
 

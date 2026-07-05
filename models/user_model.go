@@ -180,11 +180,60 @@ func FindUserByID(id int64) (User, error) {
 	return user, nil
 }
 
-// ListUsers 返回用户列表，给 controllers/user_controller.go 的演示接口使用。
-func ListUsers() ([]UserDTO, error) {
+// UserListOptions 描述用户列表查询条件。
+type UserListOptions struct {
+	// Keyword 同时匹配 username、nickname 和 external_id，用于联系人搜索。
+	Keyword    string
+	// AuthSource 用于区分本地注册用户和外部用户管理服务同步来的用户。
+	AuthSource string
+	// Status 为 nil 时不按状态过滤；非 nil 时精确匹配 users.status。
+	Status     *int
+	// Limit 和 Offset 只在 All=false 时生效。
+	Limit      int
+	Offset     int
+	// All=true 表示显式请求全量列表，适合通讯录初始化等小规模场景。
+	All        bool
+}
+
+// ListUsers 返回用户列表，给 controllers/user_controller.go 的客户端接口使用。
+func ListUsers(options UserListOptions) ([]UserDTO, error) {
 	var users []User
-	// 后注册的用户排在前面，方便后台调试时看到最新数据。
-	if err := DB.Order("id desc").Find(&users).Error; err != nil {
+	query := DB.Model(&User{})
+
+	keyword := strings.TrimSpace(options.Keyword)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("username LIKE ? OR nickname LIKE ? OR external_id LIKE ?", like, like, like)
+	}
+
+	authSource := strings.TrimSpace(options.AuthSource)
+	if authSource != "" {
+		query = query.Where("auth_source = ?", authSource)
+	}
+
+	if options.Status != nil {
+		query = query.Where("status = ?", *options.Status)
+	}
+
+	// all=true 用于通讯录等场景一次性读取全量用户；否则按 limit/offset 分页读取。
+	// 默认分页可以避免误调用时把用户表一次性全部扫出来；最大 500 是接口层面的保护上限。
+	if !options.All {
+		limit := options.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		if limit > 500 {
+			limit = 500
+		}
+		query = query.Limit(limit)
+
+		if options.Offset > 0 {
+			query = query.Offset(options.Offset)
+		}
+	}
+
+	// 后注册的用户排在前面，方便客户端看到最新同步的外部用户。
+	if err := query.Order("id desc").Find(&users).Error; err != nil {
 		return nil, fmt.Errorf("查询用户列表失败: %w", err)
 	}
 

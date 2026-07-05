@@ -112,6 +112,8 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 
 		users := api.Group("/users", middlewares.AuthRequired(cfg.JWT))
 		{
+			// 正式用户列表接口，前端通讯录初始化通过 all=true 显式读取全量用户。
+			users.GET("", userController.Index)
 			users.POST("/presence", presenceController.Show)
 			users.POST("/presence/batch", presenceController.Batch)
 		}
@@ -125,7 +127,7 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		// 整个分组统一挂 AuthRequired，组内接口默认都需要登录。
 		admin := api.Group("/admin", middlewares.AuthRequired(cfg.JWT))
 		{
-			// 获取所有用户信息，当前用于验证 GORM 查询和用户表映射。
+			// 兼容旧客户端；新客户端请使用 GET /api/users，避免普通业务依赖 admin 路径。
 			admin.GET("/users", userController.Index)
 		}
 	}

@@ -140,7 +140,7 @@ POST /api/devices
 GET  /api/devices
 DELETE /api/devices
 POST /api/resources/upload
-GET  /api/admin/users
+GET  /api/users?all=true
 GET  /api/ws
 ```
 

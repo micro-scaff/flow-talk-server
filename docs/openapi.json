@@ -361,17 +361,73 @@
         }
       }
     },
-    "/api/admin/users": {
+    "/api/users": {
       "get": {
         "tags": [
           "用户"
         ],
         "summary": "获取用户列表",
-        "description": "返回数据库中的所有用户信息。当前接口用于管理和调试。",
+        "description": "返回用户列表。传入 all=true 时读取全部用户；不传 all 时支持 limit/offset 分页。",
         "operationId": "listUsers",
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "all",
+            "in": "query",
+            "description": "是否读取全部用户",
+            "schema": {
+              "type": "boolean",
+              "example": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "分页条数，不传默认 50，最大 500",
+            "schema": {
+              "type": "integer",
+              "example": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "分页偏移",
+            "schema": {
+              "type": "integer",
+              "example": 0
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "description": "搜索用户名、昵称或外部 ID",
+            "schema": {
+              "type": "string",
+              "example": "alice"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "用户状态，1 正常，0 禁用",
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          },
+          {
+            "name": "auth_source",
+            "in": "query",
+            "description": "用户来源，local 或 external",
+            "schema": {
+              "type": "string",
+              "example": "external"
+            }
           }
         ],
         "responses": {
