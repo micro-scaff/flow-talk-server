@@ -72,6 +72,13 @@ type MessageDTO struct {
 	SentAt         string          `json:"sent_at"`
 }
 
+// SendMessageResult 表示一次发送请求的结果。
+// Created 用于区分真正新写入的消息和 client_msg_id 幂等命中的旧消息。
+type SendMessageResult struct {
+	Message MessageDTO
+	Created bool
+}
+
 // MessagePageDTO 是历史消息分页响应。
 // NextBeforeID 使用当前页最后一条消息 ID，客户端下一页传 before_id 即可继续向前翻。
 type MessagePageDTO struct {
@@ -91,16 +98,28 @@ type ReadStateDTO struct {
 // SendMessage 写入消息，并同步更新会话最后消息。
 // 这个方法是 HTTP 发送和后续 WebSocket 发送的共同入口，避免两套入库逻辑分叉。
 func SendMessage(senderID int64, conversationID int64, clientMsgID string, messageType string, content json.RawMessage) (MessageDTO, error) {
+	result, err := SendMessageWithResult(senderID, conversationID, clientMsgID, messageType, content)
+	if err != nil {
+		return MessageDTO{}, err
+	}
+	return result.Message, nil
+}
+
+// SendMessageWithResult 写入消息，并返回该请求是否真正创建了新消息。
+// HTTP 重试或 WebSocket ack 超时后的兜底发送可能命中同一个 client_msg_id；
+// 这类幂等请求应返回已有消息，但不应再次触发实时投递。
+func SendMessageWithResult(senderID int64, conversationID int64, clientMsgID string, messageType string, content json.RawMessage) (SendMessageResult, error) {
 	clientMsgID = strings.TrimSpace(clientMsgID)
 	messageType = strings.TrimSpace(messageType)
 	if senderID <= 0 || conversationID <= 0 || clientMsgID == "" {
-		return MessageDTO{}, ErrValidation
+		return SendMessageResult{}, ErrValidation
 	}
 	if err := validateMessageContent(messageType, content); err != nil {
-		return MessageDTO{}, err
+		return SendMessageResult{}, err
 	}
 
 	var saved Message
+	created := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		// 发送消息前必须确认发送者仍是 active 成员。
 		if _, err := ensureActiveMemberWithDB(tx, senderID, conversationID); err != nil {
@@ -110,7 +129,13 @@ func SendMessage(senderID int64, conversationID int64, clientMsgID string, messa
 		// client_msg_id 用于客户端重试幂等；已有消息直接返回。
 		existing, err := findMessageByClientMsgIDWithDB(tx, senderID, clientMsgID)
 		if err == nil {
+			// client_msg_id 只允许作为“同一发送者、同一会话”的重试凭据。
+			// 如果客户端把同一个 client_msg_id 复用到另一个会话，应按参数错误处理，而不是返回旧会话消息。
+			if existing.ConversationID != conversationID {
+				return ErrValidation
+			}
 			saved = existing
+			created = false
 			return nil
 		}
 		if !errors.Is(err, ErrMessageNotFound) {
@@ -128,11 +153,17 @@ func SendMessage(senderID int64, conversationID int64, clientMsgID string, messa
 		}
 		if err := tx.Create(&message).Error; err != nil {
 			if isDuplicateKey(err) {
+				// 并发重试可能同时 INSERT 同一个 client_msg_id。
+				// 其中一个请求成功后，其它请求命中唯一键冲突，转为查询已有消息并按幂等成功返回。
 				existing, findErr := findMessageByClientMsgIDWithDB(tx, senderID, clientMsgID)
 				if findErr != nil {
 					return findErr
 				}
+				if existing.ConversationID != conversationID {
+					return ErrValidation
+				}
 				saved = existing
+				created = false
 				return nil
 			}
 			return err
@@ -146,12 +177,16 @@ func SendMessage(senderID int64, conversationID int64, clientMsgID string, messa
 			return err
 		}
 		saved = message
+		created = true
 		return nil
 	})
 	if err != nil {
-		return MessageDTO{}, fmt.Errorf("发送消息失败: %w", err)
+		return SendMessageResult{}, fmt.Errorf("发送消息失败: %w", err)
 	}
-	return saved.ToDTO(), nil
+	return SendMessageResult{
+		Message: saved.ToDTO(),
+		Created: created,
+	}, nil
 }
 
 // ListMessages 按消息 ID 游标分页查询历史消息。
@@ -161,6 +196,8 @@ func ListMessages(userID int64, conversationID int64, beforeID int64, limit int)
 	}
 
 	pageLimit := normalizeMessagePageLimit(limit)
+	// 多查 1 条用于判断 has_more，不需要额外 COUNT。
+	// 聊天历史通常只关心“是否还有上一页”，COUNT 大表成本更高。
 	queryLimit := pageLimit + 1
 
 	query := DB.Where("conversation_id = ? AND status = ?", conversationID, MessageStatusNormal)
@@ -178,6 +215,8 @@ func ListMessages(userID int64, conversationID int64, beforeID int64, limit int)
 		messages = messages[:pageLimit]
 	}
 
+	// 数据库按 id desc 取最近消息，接口保持这个顺序返回；
+	// 前端如需从旧到新展示，可以在本地按 id 升序排列。
 	items := make([]MessageDTO, 0, len(messages))
 	var nextBeforeID int64
 	for _, message := range messages {
@@ -210,6 +249,7 @@ func MarkConversationRead(userID int64, conversationID int64, lastReadMessageID 
 			return err
 		}
 		if message.ConversationID != conversationID {
+			// 已读游标必须属于当前会话，不能用其它会话的消息 ID 推进游标。
 			return ErrReadCursorInvalid
 		}
 

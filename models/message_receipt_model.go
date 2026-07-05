@@ -9,8 +9,10 @@ import (
 )
 
 const (
+	// MessageReceiptUnread 表示当前用户把单条消息标记为未读。
 	MessageReceiptUnread = "unread"
-	MessageReceiptRead   = "read"
+	// MessageReceiptRead 表示当前用户已经读过单条消息。
+	MessageReceiptRead = "read"
 )
 
 // ErrInvalidReceiptStatus 表示回执状态不是 unread/read。
@@ -27,9 +29,12 @@ type MessageReceipt struct {
 }
 
 func (MessageReceipt) TableName() string {
+	// 明确表名，避免 GORM 把结构名推导成其它复数形式。
 	return "message_receipts"
 }
 
+// MessageReceiptDTO 是回执接口返回给前端的结构。
+// 不暴露自增 id，因为业务上唯一标识是 message_id + user_id。
 type MessageReceiptDTO struct {
 	MessageID int64  `json:"message_id"`
 	UserID    int64  `json:"user_id"`
@@ -37,6 +42,7 @@ type MessageReceiptDTO struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// ToDTO 把数据库回执转换成接口输出。
 func (r MessageReceipt) ToDTO() MessageReceiptDTO {
 	// updated_at 用 RFC3339 输出，和其它消息/会话时间字段保持一致。
 	return MessageReceiptDTO{
@@ -48,6 +54,8 @@ func (r MessageReceipt) ToDTO() MessageReceiptDTO {
 }
 
 func UpsertMessageReceipt(messageID int64, userID int64, status string) error {
+	// 回执状态目前只有 read/unread 两种。
+	// delivered 这类送达状态后续如果需要，应扩展常量和数据库约束后再开放。
 	if status != MessageReceiptUnread && status != MessageReceiptRead {
 		return ErrInvalidReceiptStatus
 	}
@@ -90,10 +98,12 @@ func UpsertMessageReceipt(messageID int64, userID int64, status string) error {
 }
 
 func MarkMessageRead(messageID int64, userID int64) error {
+	// 语义化包装，方便 controller 或后续内部调用不用关心具体字符串常量。
 	return UpsertMessageReceipt(messageID, userID, MessageReceiptRead)
 }
 
 func MarkMessageUnread(messageID int64, userID int64) error {
+	// 语义化包装，和 MarkMessageRead 保持对称。
 	return UpsertMessageReceipt(messageID, userID, MessageReceiptUnread)
 }
 

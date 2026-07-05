@@ -235,6 +235,8 @@ func (cfg MySQLConfig) BuildDSN() (string, error) {
 }
 
 func maskSecret(value string) string {
+	// 启动日志会打印配置摘要，但不能输出密码或 JWT secret。
+	// 空值保留为空，方便判断“未配置”和“已配置但被隐藏”。
 	if value == "" {
 		return ""
 	}
@@ -242,6 +244,8 @@ func maskSecret(value string) string {
 }
 
 func maskDSN(value string) string {
+	// DSN 中 @ 之前通常包含 username/password。
+	// 日志只保留 @ 之后的网络地址和数据库名，便于排查连接目标。
 	if value == "" {
 		return ""
 	}
@@ -252,6 +256,8 @@ func maskDSN(value string) string {
 }
 
 func defaultInstanceID() string {
+	// Redis presence 需要区分不同服务实例写入的连接快照。
+	// hostname + pid 对本地多进程和常见部署场景足够稳定，也不需要额外配置。
 	hostname, err := os.Hostname()
 	if err != nil || strings.TrimSpace(hostname) == "" {
 		hostname = "unknown-host"

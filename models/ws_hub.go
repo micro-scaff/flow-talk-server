@@ -75,6 +75,8 @@ type WSHub struct {
 	connections map[int64]map[string]*WSConnection
 }
 
+// NewWSHub 创建空的本机连接表。
+// 外层 key 是 user_id，内层 key 是 connection_id，便于一个用户多端同时在线。
 func NewWSHub() *WSHub {
 	return &WSHub{
 		connections: make(map[int64]map[string]*WSConnection),
@@ -183,6 +185,8 @@ func (h *WSHub) LocalPresence(userID int64) PresenceDTO {
 }
 
 func (h *WSHub) connectionsForUsers(userIDs []int64) []*WSConnection {
+	// 返回连接切片时只持有读锁构造快照。
+	// 真正写入 WebSocket 在锁外完成，避免慢连接阻塞其它连接注册/移除。
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -196,6 +200,8 @@ func (h *WSHub) connectionsForUsers(userIDs []int64) []*WSConnection {
 }
 
 func formatOptionalTime(value time.Time) string {
+	// Presence 响应里空时间不返回 0001-01-01，而是返回空字符串。
+	// 这样前端可以用空值判断“没有活跃时间”。
 	if value.IsZero() {
 		return ""
 	}

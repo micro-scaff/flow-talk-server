@@ -55,6 +55,7 @@ func (DemoTokenVerifier) Verify(accessToken string) (ExternalUserProfile, error)
 func verifierForProvider(provider string) (TokenVerifier, error) {
 	// provider 路由集中放在这里。
 	// 后续新增企业微信、OAuth、内部网关等 provider 时，只扩展这个 switch 或替换成注册表即可。
+	// 不允许客户端直接指定任意回调地址或 verifier 名称，避免把登录校验变成开放代理。
 	switch strings.TrimSpace(provider) {
 	case "demo":
 		return DemoTokenVerifier{}, nil

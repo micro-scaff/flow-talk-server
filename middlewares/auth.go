@@ -111,6 +111,7 @@ func VerifyToken(token string, secret string) (jwtClaims, error) {
 
 	// 先校验签名，确认 token 确实由当前服务密钥签发。
 	unsigned := parts[0] + "." + parts[1]
+	// hmac.Equal 是 constant-time 比较，避免普通字符串比较在签名校验中暴露时序差异。
 	if !hmac.Equal([]byte(sign(unsigned, secret)), []byte(parts[2])) {
 		return jwtClaims{}, ErrInvalidToken
 	}

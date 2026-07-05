@@ -149,14 +149,19 @@ func (ctl WSController) handleMessageSend(user models.User, event models.WSEvent
 
 	// WebSocket 发送和 HTTP 发送共用 SendMessage。
 	// 这样消息内容校验、成员权限、client_msg_id 幂等、最后消息更新都只有一套实现。
-	message, err := models.SendMessage(user.ID, req.ConversationID, req.ClientMsgID, req.MessageType, req.Content)
+	result, err := models.SendMessageWithResult(user.ID, req.ConversationID, req.ClientMsgID, req.MessageType, req.Content)
 	if err != nil {
 		wsConn.SendEvent(models.NewWSErrorEvent(event.RequestID, wsMessageForError(err)))
 		return
 	}
+	message := result.Message
 
 	// ack 只回给当前连接，表示客户端这次发送请求已经完成入库。
 	wsConn.SendEvent(models.NewWSEvent(models.WSEventMessageAck, event.RequestID, message))
+
+	if !result.Created {
+		return
+	}
 
 	// 只投递 active 成员；已退出或被移除成员不会收到实时消息。
 	memberIDs, err := models.ListActiveConversationMemberIDs(message.ConversationID)
@@ -175,16 +180,21 @@ func (ctl WSController) handleMessageSend(user models.User, event models.WSEvent
 }
 
 func (ctl WSController) publishMessageDeliver(event models.MessageDeliverEvent) error {
+	// controller 方法保留一层包装，便于测试时直接替换 Bus/Hub 组合。
 	return publishMessageDeliver(ctl.Bus, ctl.Hub, event)
 }
 
 func (ctl WSController) presenceTracker() models.PresenceTracker {
+	// PresenceTracker 可选注入。
+	// 单机内存模式下用 Noop，Redis 模式下写入全局在线状态。
 	if ctl.PresenceTracker != nil {
 		return ctl.PresenceTracker
 	}
 	return models.NoopPresenceTracker{}
 }
 
+// DeliverMessageToLocalHub 把实时投递事件转换成 WebSocket message.deliver。
+// Redis 多实例模式下每个实例都会收到同一事件，但只会投递给本机 Hub 里真实存在的连接。
 func DeliverMessageToLocalHub(hub *models.WSHub, event models.MessageDeliverEvent) {
 	if hub == nil {
 		return
@@ -195,6 +205,8 @@ func DeliverMessageToLocalHub(hub *models.WSHub, event models.MessageDeliverEven
 }
 
 func publishMessageDeliver(bus models.RealtimeBus, hub *models.WSHub, event models.MessageDeliverEvent) error {
+	// bus 为空时直接走本机 Hub，方便单元测试和最小化单进程部署。
+	// 正常启动时路由层会注入 MemoryRealtimeBus 或 RedisRealtimeBus。
 	if bus == nil {
 		DeliverMessageToLocalHub(hub, event)
 		return nil
@@ -203,6 +215,8 @@ func publishMessageDeliver(bus models.RealtimeBus, hub *models.WSHub, event mode
 }
 
 func wsMessageForError(err error) string {
+	// WebSocket error 事件不能依赖 HTTP 状态码，所以这里把领域错误翻译成稳定中文文案。
+	// 具体数据库错误不下发给客户端，避免泄露 SQL、索引名或内部表结构。
 	switch {
 	case errors.Is(err, models.ErrValidation),
 		errors.Is(err, models.ErrInvalidMember),

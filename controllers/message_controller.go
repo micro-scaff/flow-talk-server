@@ -52,23 +52,26 @@ func (ctl MessageController) Create(c *gin.Context) {
 		return
 	}
 
-	message, err := models.SendMessage(user.ID, req.ConversationID, req.ClientMsgID, req.MessageType, req.Content)
+	result, err := models.SendMessageWithResult(user.ID, req.ConversationID, req.ClientMsgID, req.MessageType, req.Content)
 	if err != nil {
 		writeMessageError(c, err)
 		return
 	}
+	message := result.Message
 
-	memberIDs, err := models.ListActiveConversationMemberIDs(message.ConversationID)
-	if err != nil {
-		writeMessageError(c, err)
-		return
-	}
-	if err := publishMessageDeliver(ctl.Bus, ctl.Hub, models.MessageDeliverEvent{
-		UserIDs: memberIDs,
-		Message: message,
-	}); err != nil {
-		writeMessageError(c, err)
-		return
+	if result.Created {
+		memberIDs, err := models.ListActiveConversationMemberIDs(message.ConversationID)
+		if err != nil {
+			writeMessageError(c, err)
+			return
+		}
+		if err := publishMessageDeliver(ctl.Bus, ctl.Hub, models.MessageDeliverEvent{
+			UserIDs: memberIDs,
+			Message: message,
+		}); err != nil {
+			writeMessageError(c, err)
+			return
+		}
 	}
 
 	responses.Success(c, message, "发送消息成功")

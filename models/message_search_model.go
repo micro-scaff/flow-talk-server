@@ -8,8 +8,10 @@ import (
 )
 
 const (
+	// defaultSearchLimit 是未传 limit 时的默认搜索结果数。
 	defaultSearchLimit = 20
-	maxSearchLimit     = 100
+	// maxSearchLimit 是单次搜索返回上限，避免 LIKE 查询一次返回过多历史消息。
+	maxSearchLimit = 100
 )
 
 // SearchConversationMessages 搜索指定会话内的文本消息。
@@ -45,6 +47,8 @@ func SearchMyMessages(userID int64, keyword string, limit int) ([]MessageDTO, er
 }
 
 func searchMessages(query *gorm.DB, keyword string, limit int) ([]MessageDTO, error) {
+	// query 由上层提前加好权限范围：会话内搜索限制 conversation_id，全局搜索限制 active member。
+	// 这个 helper 只追加消息类型、状态、关键字和分页条件。
 	pageLimit := normalizeSearchLimit(limit)
 	// 参数仍然通过占位符传给 MySQL，不拼接 SQL，避免 LIKE 查询中的注入风险。
 	like := "%" + keyword + "%"

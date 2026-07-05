@@ -33,12 +33,17 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	presenceProvider := models.PresenceProvider(models.NewHubPresenceProvider(wsHub))
 	presenceTracker := models.PresenceTracker(models.NoopPresenceTracker{})
 	if cfg.Redis.Enabled && models.RedisClient != nil {
+		// 启用 Redis 后：
+		// 1. 消息投递先发布到 Pub/Sub，再由各实例投递给自己的本机连接；
+		// 2. 在线状态写入 Redis TTL key，批量查询能看到跨实例连接。
 		realtimeBus = models.NewRedisRealtimeBus(models.RedisClient, cfg.Redis.Channel)
 		redisPresence := models.NewRedisPresenceStore(models.RedisClient, cfg.Redis)
 		presenceProvider = redisPresence
 		presenceTracker = redisPresence
 	}
 	if err := realtimeBus.SubscribeMessageDeliver(func(event models.MessageDeliverEvent) {
+		// 订阅端只负责把事件转成本机 Hub 投递。
+		// 这样 HTTP 发送、WebSocket 发送和 Redis Pub/Sub 都复用同一个最终投递入口。
 		controllers.DeliverMessageToLocalHub(wsHub, event)
 	}); err != nil {
 		log.Printf("订阅实时投递事件失败: %v", err)

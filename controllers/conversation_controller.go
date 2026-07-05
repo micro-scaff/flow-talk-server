@@ -111,6 +111,8 @@ func (ctl ConversationController) CreateGroup(c *gin.Context) {
 }
 
 func currentUserOrUnauthorized(c *gin.Context) (models.User, bool) {
+	// 所有需要登录的 controller 都走这个 helper。
+	// 它把“从 Gin Context 取当前用户”和“鉴权缺失时返回 401”收敛到一处，避免每个接口重复写。
 	user, ok := middlewares.CurrentUser(c)
 	if !ok {
 		responses.Error(c, http.StatusUnauthorized, "未登录或登录已失效")

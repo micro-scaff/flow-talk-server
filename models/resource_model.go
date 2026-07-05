@@ -19,6 +19,8 @@ const (
 	// ResourceTypeVideo 表示用户上传的是聊天视频资源。
 	ResourceTypeVideo = "video"
 
+	// staticRootDir 是上传资源在服务端本地磁盘的根目录。
+	// main.go 会把 ./static 暴露为 /api/static，因此这里返回 URL 时会加上 /api 前缀。
 	staticRootDir = "static"
 )
 
@@ -51,16 +53,20 @@ func SaveUploadedResource(userID int64, resourceType string, header *multipart.F
 	}
 
 	ext := strings.ToLower(filepath.Ext(header.Filename))
+	// 只信任文件扩展名做当前阶段的轻量校验。
+	// 如果后续面向公网，应再加入 MIME 嗅探、病毒扫描和对象存储直传。
 	dirName, err := resourceDirAndValidateExt(resourceType, ext)
 	if err != nil {
 		return ResourceDTO{}, err
 	}
 
+	// 每个用户单独一个目录，避免不同用户上传同名文件互相覆盖，也方便后续做用户维度清理。
 	userDir := filepath.Join(staticRootDir, dirName, strconv.FormatInt(userID, 10))
 	if err := os.MkdirAll(userDir, 0755); err != nil {
 		return ResourceDTO{}, fmt.Errorf("创建资源目录失败: %w", err)
 	}
 
+	// 使用纳秒时间戳作为文件名，并配合 O_EXCL 确保极端并发下不会覆盖已有文件。
 	filename := strconv.FormatInt(time.Now().UnixNano(), 10) + ext
 	dstPath := filepath.Join(userDir, filename)
 	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
@@ -106,6 +112,8 @@ func NormalizeAvatarBase64(value string) (string, error) {
 }
 
 func resourceDirAndValidateExt(resourceType string, ext string) (string, error) {
+	// resourceType 决定子目录和后缀白名单。
+	// 这里返回目录名而不是完整路径，让上层统一拼 userID 目录。
 	if ext == "" {
 		return "", ErrInvalidResourceFile
 	}
@@ -127,6 +135,7 @@ func resourceDirAndValidateExt(resourceType string, ext string) (string, error) 
 }
 
 func allowedExt(ext string, allowed []string) bool {
+	// allowed 列表保持小而明确；新增格式时只需要改白名单，不需要碰上传主流程。
 	for _, item := range allowed {
 		if ext == item {
 			return true

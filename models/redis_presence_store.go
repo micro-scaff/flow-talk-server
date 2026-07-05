@@ -91,6 +91,8 @@ func (s *RedisPresenceStore) Presence(userID int64) (PresenceDTO, error) {
 	staleConnectionIDs := make([]interface{}, 0)
 	for _, connectionID := range connectionIDs {
 		key := s.connectionKey(userID, connectionID)
+		// ZSET 只是连接 ID 索引，真实连接详情保存在带 TTL 的 hash。
+		// hash 过期但 ZSET 还没过期时，HGetAll 会返回空，此时把 connection_id 标记为陈旧索引。
 		values, err := s.client.HGetAll(ctx, key).Result()
 		if err != nil {
 			return PresenceDTO{}, err
@@ -109,6 +111,7 @@ func (s *RedisPresenceStore) Presence(userID int64) (PresenceDTO, error) {
 		}
 	}
 	if len(staleConnectionIDs) > 0 {
+		// 清理陈旧索引失败不影响本次在线状态结果，因此忽略错误。
 		_ = s.client.ZRem(ctx, s.connectionsKey(userID), staleConnectionIDs...).Err()
 	}
 
@@ -170,6 +173,7 @@ func (s *RedisPresenceStore) writeConnection(conn *WSConnection) error {
 	}).Err(); err != nil {
 		return err
 	}
+	// ZSET 的 TTL 比单连接 hash 略长，给 Presence 查询留出清理陈旧索引的窗口。
 	return s.client.Expire(ctx, s.connectionsKey(conn.UserID), s.ttl*2).Err()
 }
 
