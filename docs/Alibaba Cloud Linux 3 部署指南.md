@@ -40,38 +40,7 @@ source /etc/profile.d/go.sh
 go version
 ```
 
-## 2. 准备数据库
-
-确认能连接已有 MySQL：
-
-```bash
-mysql -h 127.0.0.1 -P 3306 -u root -p
-```
-
-创建数据库：
-
-```sql
-CREATE DATABASE IF NOT EXISTS flow_talk
-  DEFAULT CHARACTER SET utf8mb4
-  DEFAULT COLLATE utf8mb4_unicode_ci;
-```
-
-项目不会自动建表，需要按顺序执行 `docs/数据库` 下的建表 SQL：
-
-1. `数据库表创建-人员.md`
-2. `数据库表创建-会话.md`
-3. `数据库表创建-消息.md`
-4. `数据库表创建-设备.md`
-5. `数据库表创建-消息回执.md`
-
-建表后检查：
-
-```sql
-USE flow_talk;
-SHOW TABLES;
-```
-
-## 3. 部署代码
+## 2. 部署代码
 
 服务器上直接拉代码并编译：
 
@@ -91,36 +60,44 @@ env PATH=/usr/local/go/bin:$PATH GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=l
 env PATH=/usr/local/go/bin:$PATH GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go build -o flow-talk-server .
 ```
 
-## 4. 本地打包
+## 3. 本地打包
 
-只需要 amd64 包时执行：
-
-```bash
-mkdir -p dist/flow-talk-server-linux-amd64/conf dist/flow-talk-server-linux-amd64/static
-env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go test ./...
-env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go build -o dist/flow-talk-server-linux-amd64/flow-talk-server .
-cp -R conf/. dist/flow-talk-server-linux-amd64/conf/
-cp -R static/. dist/flow-talk-server-linux-amd64/static/
-```
-
-ARM 服务器改用：
+默认打 amd64 包：
 
 ```bash
-mkdir -p dist/flow-talk-server-linux-arm64/conf dist/flow-talk-server-linux-arm64/static
-env GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go test ./...
-env GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go build -o dist/flow-talk-server-linux-arm64/flow-talk-server .
-cp -R conf/. dist/flow-talk-server-linux-arm64/conf/
-cp -R static/. dist/flow-talk-server-linux-arm64/static/
+export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
+export GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache"
+export GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local
+
+OUT="dist/flow-talk-server-linux-$GOARCH"
+mkdir -p "$OUT/conf" "$OUT/static"
+
+go test ./...
+go build -o "$OUT/flow-talk-server" .
+cp -R conf/. "$OUT/conf/"
+cp -R static/. "$OUT/static/"
+tar -czf "$OUT.tar.gz" -C dist "$(basename "$OUT")"
 ```
 
-产物：
+说明：
+
+- `GOOS=linux GOARCH=amd64` 表示生成 Linux amd64 服务器可运行的二进制；ARM 服务器把 `GOARCH=amd64` 改成 `GOARCH=arm64`。
+- `CGO_ENABLED=0` 尽量生成不依赖本机 C 动态库的二进制，上传到服务器更省心。
+- `GOCACHE` 和 `GOMODCACHE` 把 Go 缓存放在当前项目目录，避免污染系统目录，也方便清理。
+- `go test ./...` 先跑测试，测试通过后再 `go build`。
+- `cp -R conf/.` 和 `cp -R static/.` 把配置文件和静态目录一起放进部署包。
+- `tar -czf` 会生成可上传的压缩包，例如 `dist/flow-talk-server-linux-amd64.tar.gz`。
+
+打包后产物：
 
 ```text
 dist/flow-talk-server-linux-amd64/
+dist/flow-talk-server-linux-amd64.tar.gz
 dist/flow-talk-server-linux-arm64/
+dist/flow-talk-server-linux-arm64.tar.gz
 ```
 
-## 5. 修改配置
+## 4. 修改配置
 
 如果当前目录已经是部署产物目录，例如：
 
@@ -175,7 +152,7 @@ instance_id =
 
 如果 MySQL 不在本机，修改 `host`、`port`、`username`、`password`。
 
-## 6. 启动服务
+## 5. 启动服务
 
 进入部署目录后，先给二进制加执行权限：
 
@@ -219,34 +196,33 @@ curl -i http://127.0.0.1:8080/api/users
 返回 `401` 也说明服务已经启动，因为该接口需要登录。
 
 ```text
-Last login: Wed Jul  8 00:44:55 2026 from 100.104.94.252
-[root@iZuf6j048vcl5t2h4hx6j2Z ~]# curl -i http://127.0.0.1:8080/api/users
 HTTP/1.1 401 Unauthorized
 Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization
 Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
 Access-Control-Allow-Origin: *
 Access-Control-Max-Age: 86400
 Content-Type: application/json; charset=utf-8
-Date: Tue, 07 Jul 2026 16:45:00 GMT
 Content-Length: 64
 
-{"code":401,"data":null,"message":"未登录或登录已失效"}[root@iZuf6j048vcl5t2h4hx6j2Z ~]# 
+{"code":401,"data":null,"message":"未登录或登录已失效"}
+```
 
 如果服务没启动，会是之前那种：
 
+```text
 curl: (7) Failed to connect
 ```
 
 停止服务：
 
 ```bash
-pkill flow-talk-server
+pkill -f 'flow-talk-server'
 ```
 
 确认是否已停止：
 
 ```bash
-ps -ef | grep flow-talk-server
+pgrep -af 'flow-talk-server'
 ```
 
 如果启动时看到了进程号，例如 `[1] 20596`，也可以按 PID 停止：
@@ -263,7 +239,7 @@ kill -9 20596
 
 注意：`tail -f app.log` 时按 `Ctrl+C` 只是退出日志查看，不会停止后端服务。
 
-## 7. systemd 启动（可选）
+## 6. systemd 启动（可选）
 
 systemd 的作用是让服务开机自启、崩溃自动重启、统一查看日志。临时部署可以跳过这一节，直接用上一节的 `nohup`。
 
@@ -322,7 +298,7 @@ curl -i http://127.0.0.1:8080/api/users
 
 返回 `401` 也说明服务已经启动，因为该接口需要登录。
 
-## 8. Nginx 反向代理
+## 7. Nginx 反向代理
 
 如果直接用 `8080` 联调，只需要在 ECS 安全组放行 `8080/tcp`。
 
@@ -371,7 +347,7 @@ nginx -t
 systemctl reload nginx
 ```
 
-## 9. 常用维护
+## 8. 常用维护
 
 更新代码：
 
