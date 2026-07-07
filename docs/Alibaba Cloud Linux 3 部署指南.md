@@ -40,6 +40,13 @@ source /etc/profile.d/go.sh
 go version
 ```
 
+为什么这里要安装 Go：
+
+- 如果在服务器上直接 `git clone` 代码并执行 `go test`、`go build`，服务器必须有 Go 环境。
+- Go 环境用于下载依赖、运行测试、把源码编译成 `flow-talk-server` 二进制文件。
+- 服务真正启动时执行的是 `./flow-talk-server`，不是 `go run`。已经编译好的二进制运行时通常不需要 Go 环境。
+- 如果使用第 3 节“本地打包”生成的部署包上传服务器，服务器只需要运行包里的 `flow-talk-server`，可以不安装 Go。
+
 ## 2. 部署代码
 
 服务器上直接拉代码并编译：
@@ -65,14 +72,15 @@ env PATH=/usr/local/go/bin:$PATH GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=l
 默认打 amd64 包：
 
 ```bash
-export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
 export GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache"
 export GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local
 
+go test ./...
+
+export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
 OUT="dist/flow-talk-server-linux-$GOARCH"
 mkdir -p "$OUT/conf" "$OUT/static"
 
-go test ./...
 go build -o "$OUT/flow-talk-server" .
 cp -R conf/. "$OUT/conf/"
 cp -R static/. "$OUT/static/"
@@ -84,7 +92,7 @@ tar -czf "$OUT.tar.gz" -C dist "$(basename "$OUT")"
 - `GOOS=linux GOARCH=amd64` 表示生成 Linux amd64 服务器可运行的二进制；ARM 服务器把 `GOARCH=amd64` 改成 `GOARCH=arm64`。
 - `CGO_ENABLED=0` 尽量生成不依赖本机 C 动态库的二进制，上传到服务器更省心。
 - `GOCACHE` 和 `GOMODCACHE` 把 Go 缓存放在当前项目目录，避免污染系统目录，也方便清理。
-- `go test ./...` 先跑测试，测试通过后再 `go build`。
+- `go test ./...` 先按本机环境跑测试，测试通过后再切到 Linux 目标架构执行 `go build`。
 - `cp -R conf/.` 和 `cp -R static/.` 把配置文件和静态目录一起放进部署包。
 - `tar -czf` 会生成可上传的压缩包，例如 `dist/flow-talk-server-linux-amd64.tar.gz`。
 
@@ -153,6 +161,8 @@ instance_id =
 如果 MySQL 不在本机，修改 `host`、`port`、`username`、`password`。
 
 ## 5. 启动服务
+
+这里启动的是已经编译好的二进制文件 `flow-talk-server`。只要配置文件和数据库连接正常，运行服务本身不再依赖 `go` 命令。
 
 进入部署目录后，先给二进制加执行权限：
 
@@ -370,3 +380,107 @@ ls -l /root/flow-talk-server/conf/app.ini
 mysql -h 127.0.0.1 -P 3306 -u root -p flow_talk
 mkdir -p /root/flow-talk-server/static
 ```
+
+## 9. Go 多版本切换工具（可选）
+
+如果服务器上有多个 Go 项目，可能会遇到不同项目要求不同 Go 版本的情况。可以在服务器上放一个简单的 `go-switch` 工具，把不同版本安装到 `/usr/local/go-版本号`，再让 `/usr/local/go` 指向当前要用的版本。
+
+先理解这个工具做什么：
+
+```text
+/usr/local/go-1.25.4      保存 Go 1.25.4 的真实文件
+/usr/local/go-1.24.7      保存 Go 1.24.7 的真实文件
+/usr/local/go             指向当前正在使用的 Go 版本
+/usr/local/bin/go-switch  用来安装和切换 Go 版本的脚本
+```
+
+例如执行 `go-switch 1.25.4 amd64` 后，最终效果是：
+
+```text
+/usr/local/go -> /usr/local/go-1.25.4
+```
+
+因为第 1 节已经把 `/usr/local/go/bin` 加进了 `PATH`，所以软链接切换后，`go version` 看到的就是新版本。
+
+创建工具。下面这段命令只需要执行一次：
+
+```bash
+cat >/usr/local/bin/go-switch <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="${1:-}"
+arch="${2:-amd64}"
+
+if [ -z "$version" ]; then
+  echo "用法: go-switch 1.25.4 [amd64|arm64]"
+  exit 1
+fi
+
+case "$arch" in
+  amd64|arm64) ;;
+  *)
+    echo "架构只能是 amd64 或 arm64"
+    exit 1
+    ;;
+esac
+
+install_dir="/usr/local/go-$version"
+tarball="/tmp/go${version}.linux-${arch}.tar.gz"
+url="https://go.dev/dl/go${version}.linux-${arch}.tar.gz"
+
+if [ ! -x "$install_dir/bin/go" ]; then
+  echo "安装 Go $version linux/$arch ..."
+  cd /tmp
+  wget -O "$tarball" "$url"
+  rm -rf /usr/local/go "$install_dir"
+  tar -C /usr/local -xzf "$tarball"
+  mv /usr/local/go "$install_dir"
+fi
+
+rm -rf /usr/local/go
+ln -s "$install_dir" /usr/local/go
+/usr/local/go/bin/go version
+EOF
+
+chmod +x /usr/local/bin/go-switch
+```
+
+这段创建命令的意思：
+
+- `cat >/usr/local/bin/go-switch <<'EOF'`：把后面的脚本内容写入 `/usr/local/bin/go-switch` 文件。
+- `#!/usr/bin/env bash`：告诉系统用 `bash` 运行这个脚本。
+- `set -euo pipefail`：脚本遇到错误就停止，避免下载或解压失败后继续执行。
+- `version="${1:-}"`：读取第一个参数作为 Go 版本号，例如 `1.25.4`。
+- `arch="${2:-amd64}"`：读取第二个参数作为服务器架构，不写时默认 `amd64`。
+- `install_dir="/usr/local/go-$version"`：每个 Go 版本安装到自己的独立目录。
+- `wget -O "$tarball" "$url"`：从 Go 官网下载安装包。
+- `tar -C /usr/local -xzf "$tarball"`：把安装包解压到 `/usr/local`。
+- `mv /usr/local/go "$install_dir"`：把刚解压出来的目录改名成带版本号的目录。
+- `ln -s "$install_dir" /usr/local/go`：让 `/usr/local/go` 指向当前选择的版本。
+- `chmod +x /usr/local/bin/go-switch`：给脚本加执行权限，否则不能直接运行。
+
+使用方式：
+
+```bash
+# x86_64 / amd64 服务器
+go-switch 1.25.4 amd64
+
+# ARM / arm64 服务器
+go-switch 1.25.4 arm64
+
+# 查看当前生效版本
+go version
+```
+
+使用方式说明：
+
+- `go-switch 1.25.4 amd64`：安装并切换到 Linux amd64 版本的 Go `1.25.4`。
+- `go-switch 1.25.4 arm64`：安装并切换到 Linux arm64 版本的 Go `1.25.4`。
+- `go version`：确认当前服务器正在使用哪个 Go 版本。
+
+说明：
+
+- 当前文档的 PATH 配置使用 `/usr/local/go/bin`，所以 `go-switch` 切换软链接后不用改环境变量。
+- 已安装过的版本会保留在 `/usr/local/go-版本号`，下次切回该版本不会重新下载。
+- 如果 `wget` 下载失败，先确认版本号和服务器架构是否存在，例如 `1.25.4 amd64` 或 `1.25.4 arm64`。
