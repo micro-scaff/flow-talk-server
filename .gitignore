@@ -38,3 +38,5 @@ tmp/**
 
 # Project-local Go tools installed by Makefile
 .bin/
+
+flow-talk-server
