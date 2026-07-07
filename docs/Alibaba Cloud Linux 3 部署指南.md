@@ -122,10 +122,25 @@ dist/flow-talk-server-linux-arm64/
 
 ## 5. 修改配置
 
-编辑：
+如果当前目录已经是部署产物目录，例如：
+
+```text
+flow-talk-server-linux-amd64/
+  conf/
+  flow-talk-server
+  static/
+```
+
+先进入该目录：
 
 ```bash
-vim /root/flow-talk-server/conf/app.ini
+cd flow-talk-server-linux-amd64
+```
+
+编辑配置：
+
+```bash
+vim conf/app.ini
 ```
 
 参考配置：
@@ -160,7 +175,97 @@ instance_id =
 
 如果 MySQL 不在本机，修改 `host`、`port`、`username`、`password`。
 
-## 6. systemd 启动（让 Go 服务变成 Linux 系统服务，由系统统一管理）
+## 6. 启动服务
+
+进入部署目录后，先给二进制加执行权限：
+
+```bash
+chmod +x ./flow-talk-server
+```
+
+前台启动，适合临时验证：
+
+```bash
+./flow-talk-server
+```
+
+看到类似下面日志，说明服务已经启动：
+
+```text
+flow-talk server listening on :8080
+```
+
+后台启动，适合不用 systemd 的简单部署：
+
+```bash
+nohup ./flow-talk-server > app.log 2>&1 &
+
+# 成功的标识
+[1] 20596
+```
+
+查看日志：
+
+```bash
+tail -f app.log
+```
+
+验证服务：
+
+```bash
+curl -i http://127.0.0.1:8080/api/users
+```
+
+返回 `401` 也说明服务已经启动，因为该接口需要登录。
+
+```text
+Last login: Wed Jul  8 00:44:55 2026 from 100.104.94.252
+[root@iZuf6j048vcl5t2h4hx6j2Z ~]# curl -i http://127.0.0.1:8080/api/users
+HTTP/1.1 401 Unauthorized
+Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization
+Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+Access-Control-Allow-Origin: *
+Access-Control-Max-Age: 86400
+Content-Type: application/json; charset=utf-8
+Date: Tue, 07 Jul 2026 16:45:00 GMT
+Content-Length: 64
+
+{"code":401,"data":null,"message":"未登录或登录已失效"}[root@iZuf6j048vcl5t2h4hx6j2Z ~]# 
+
+如果服务没启动，会是之前那种：
+
+curl: (7) Failed to connect
+```
+
+停止服务：
+
+```bash
+pkill flow-talk-server
+```
+
+确认是否已停止：
+
+```bash
+ps -ef | grep flow-talk-server
+```
+
+如果启动时看到了进程号，例如 `[1] 20596`，也可以按 PID 停止：
+
+```bash
+kill 20596
+```
+
+如果还没停，再强制停止：
+
+```bash
+kill -9 20596
+```
+
+注意：`tail -f app.log` 时按 `Ctrl+C` 只是退出日志查看，不会停止后端服务。
+
+## 7. systemd 启动（可选）
+
+systemd 的作用是让服务开机自启、崩溃自动重启、统一查看日志。临时部署可以跳过这一节，直接用上一节的 `nohup`。
 
 创建服务文件：
 
@@ -188,6 +293,13 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 ```
 
+如果你的实际目录不是 `/root/flow-talk-server`，把 `WorkingDirectory` 和 `ExecStart` 改成真实路径。例如当前包目录在 `/root/server-go/flow-talk-server-linux-amd64`，则改成：
+
+```ini
+WorkingDirectory=/root/server-go/flow-talk-server-linux-amd64
+ExecStart=/root/server-go/flow-talk-server-linux-amd64/flow-talk-server
+```
+
 启动：
 
 ```bash
@@ -210,7 +322,7 @@ curl -i http://127.0.0.1:8080/api/users
 
 返回 `401` 也说明服务已经启动，因为该接口需要登录。
 
-## 7. Nginx 反向代理
+## 8. Nginx 反向代理
 
 如果直接用 `8080` 联调，只需要在 ECS 安全组放行 `8080/tcp`。
 
@@ -259,7 +371,7 @@ nginx -t
 systemctl reload nginx
 ```
 
-## 8. 常用维护
+## 9. 常用维护
 
 更新代码：
 
