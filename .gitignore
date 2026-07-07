@@ -40,3 +40,5 @@ tmp/**
 .bin/
 
 flow-talk-server
+
+/dist/

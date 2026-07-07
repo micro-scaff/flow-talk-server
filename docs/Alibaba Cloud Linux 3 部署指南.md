@@ -101,8 +101,6 @@ env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$P
 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go build -o dist/flow-talk-server-linux-amd64/flow-talk-server .
 cp -R conf/. dist/flow-talk-server-linux-amd64/conf/
 cp -R static/. dist/flow-talk-server-linux-amd64/static/
-cp README.md dist/flow-talk-server-linux-amd64/README.md
-tar -czf dist/flow-talk-server-linux-amd64.tar.gz -C dist flow-talk-server-linux-amd64
 ```
 
 ARM 服务器改用：
@@ -113,15 +111,13 @@ env GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$P
 env GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go build -o dist/flow-talk-server-linux-arm64/flow-talk-server .
 cp -R conf/. dist/flow-talk-server-linux-arm64/conf/
 cp -R static/. dist/flow-talk-server-linux-arm64/static/
-cp README.md dist/flow-talk-server-linux-arm64/README.md
-tar -czf dist/flow-talk-server-linux-arm64.tar.gz -C dist flow-talk-server-linux-arm64
 ```
 
 产物：
 
 ```text
-dist/flow-talk-server-linux-amd64.tar.gz
-dist/flow-talk-server-linux-arm64.tar.gz
+dist/flow-talk-server-linux-amd64/
+dist/flow-talk-server-linux-arm64/
 ```
 
 ## 5. 修改配置
