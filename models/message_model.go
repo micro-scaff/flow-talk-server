@@ -87,14 +87,6 @@ type MessagePageDTO struct {
 	HasMore      bool         `json:"has_more"`
 }
 
-// ReadStateDTO 是标记已读后的游标状态。
-// last_read_message_id 只会向前推进，不会因为客户端传较小 ID 而回退。
-type ReadStateDTO struct {
-	ConversationID    int64  `json:"conversation_id"`
-	LastReadMessageID int64  `json:"last_read_message_id"`
-	LastReadAt        string `json:"last_read_at"`
-}
-
 // SendMessage 写入消息，并同步更新会话最后消息。
 // 这个方法是 HTTP 发送和后续 WebSocket 发送的共同入口，避免两套入库逻辑分叉。
 func SendMessage(senderID int64, conversationID int64, clientMsgID string, messageType string, content json.RawMessage) (MessageDTO, error) {
@@ -232,12 +224,11 @@ func ListMessages(userID int64, conversationID int64, beforeID int64, limit int)
 }
 
 // MarkConversationRead 更新当前用户在会话中的已读游标。
-func MarkConversationRead(userID int64, conversationID int64, lastReadMessageID int64) (ReadStateDTO, error) {
+func MarkConversationRead(userID int64, conversationID int64, lastReadMessageID int64) (ConversationUnreadStateDTO, error) {
 	if userID <= 0 || conversationID <= 0 || lastReadMessageID <= 0 {
-		return ReadStateDTO{}, ErrValidation
+		return ConversationUnreadStateDTO{}, ErrValidation
 	}
 
-	var state ReadStateDTO
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		member, err := ensureActiveMemberWithDB(tx, userID, conversationID)
 		if err != nil {
@@ -266,23 +257,16 @@ func MarkConversationRead(userID int64, conversationID int64, lastReadMessageID 
 			if err != nil {
 				return err
 			}
-			state = ReadStateDTO{
-				ConversationID:    conversationID,
-				LastReadMessageID: lastReadMessageID,
-				LastReadAt:        readAt.Format(time.RFC3339),
-			}
 			return nil
-		}
-
-		state = ReadStateDTO{
-			ConversationID:    conversationID,
-			LastReadMessageID: currentReadID,
-			LastReadAt:        timeString(member.LastReadAt),
 		}
 		return nil
 	})
 	if err != nil {
-		return ReadStateDTO{}, fmt.Errorf("标记已读失败: %w", err)
+		return ConversationUnreadStateDTO{}, fmt.Errorf("标记已读失败: %w", err)
+	}
+	state, err := GetConversationUnreadState(userID, conversationID)
+	if err != nil {
+		return ConversationUnreadStateDTO{}, fmt.Errorf("读取已读后的未读状态失败: %w", err)
 	}
 	return state, nil
 }

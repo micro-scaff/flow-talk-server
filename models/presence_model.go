@@ -29,6 +29,7 @@ type PresenceDTO struct {
 	ConnectionCount int    `json:"connection_count"`
 	LastActiveAt    string `json:"last_active_at,omitempty"`
 	LastSeenAt      string `json:"last_seen_at,omitempty"`
+	Revision        int64  `json:"revision"`
 }
 
 // UserPresenceDTO 合并用户资料和在线状态，供前端直接渲染人员列表。

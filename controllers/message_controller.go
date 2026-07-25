@@ -65,10 +65,7 @@ func (ctl MessageController) Create(c *gin.Context) {
 			writeMessageError(c, err)
 			return
 		}
-		if err := publishMessageDeliver(ctl.Bus, ctl.Hub, models.MessageDeliverEvent{
-			UserIDs: memberIDs,
-			Message: message,
-		}); err != nil {
+		if err := publishCreatedMessageUpdates(ctl.Bus, ctl.Hub, memberIDs, message); err != nil {
 			writeMessageError(c, err)
 			return
 		}
@@ -113,6 +110,13 @@ func (ctl MessageController) MarkRead(c *gin.Context) {
 
 	state, err := models.MarkConversationRead(user.ID, req.ConversationID, req.LastReadMessageID)
 	if err != nil {
+		writeMessageError(c, err)
+		return
+	}
+	if err := publishConversationUnreadChanged(ctl.Bus, ctl.Hub, models.ConversationUnreadChangedEvent{
+		UserID: user.ID,
+		State:  state,
+	}); err != nil {
 		writeMessageError(c, err)
 		return
 	}

@@ -71,15 +71,17 @@ func (c *WSConnection) SendBytes(payload []byte) {
 // WSHub 是单进程内存连接管理器。
 // v4 只要求单实例投递；v7 的多实例扩展会通过 RealtimeBus 接口在这个边界外继续扩展。
 type WSHub struct {
-	mu          sync.RWMutex
-	connections map[int64]map[string]*WSConnection
+	mu                sync.RWMutex
+	connections       map[int64]map[string]*WSConnection
+	presenceRevisions map[int64]int64
 }
 
 // NewWSHub 创建空的本机连接表。
 // 外层 key 是 user_id，内层 key 是 connection_id，便于一个用户多端同时在线。
 func NewWSHub() *WSHub {
 	return &WSHub{
-		connections: make(map[int64]map[string]*WSConnection),
+		connections:       make(map[int64]map[string]*WSConnection),
+		presenceRevisions: make(map[int64]int64),
 	}
 }
 
@@ -92,15 +94,19 @@ func (h *WSHub) Add(conn *WSConnection) {
 		h.connections[conn.UserID] = make(map[string]*WSConnection)
 	}
 	h.connections[conn.UserID][conn.ID] = conn
+	h.presenceRevisions[conn.UserID]++
 }
 
 // Remove 移除连接并关闭发送队列。
 func (h *WSHub) Remove(userID int64, connectionID string) {
 	h.mu.Lock()
 	conn := h.connections[userID][connectionID]
-	delete(h.connections[userID], connectionID)
-	if len(h.connections[userID]) == 0 {
-		delete(h.connections, userID)
+	if conn != nil {
+		delete(h.connections[userID], connectionID)
+		if len(h.connections[userID]) == 0 {
+			delete(h.connections, userID)
+		}
+		h.presenceRevisions[userID]++
 	}
 	h.mu.Unlock()
 
@@ -136,6 +142,18 @@ func (h *WSHub) BroadcastEventToUsers(userIDs []int64, event WSEvent) {
 		return
 	}
 	h.BroadcastToUsers(userIDs, payload)
+}
+
+// BroadcastEventToAll 把事件投递给当前实例上的全部连接。
+// presence.changed 当前对所有登录用户公开，和批量 presence HTTP 接口的权限保持一致。
+func (h *WSHub) BroadcastEventToAll(event WSEvent) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	for _, conn := range h.allConnections() {
+		conn.SendBytes(payload)
+	}
 }
 
 // Touch 更新连接活跃时间，供 ping 或任意客户端事件调用。
@@ -181,7 +199,21 @@ func (h *WSHub) LocalPresence(userID int64) PresenceDTO {
 		Online:          connectionCount > 0,
 		ConnectionCount: connectionCount,
 		LastActiveAt:    formatOptionalTime(lastActive),
+		Revision:        h.presenceRevisions[userID],
 	}
+}
+
+func (h *WSHub) allConnections() []*WSConnection {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	result := make([]*WSConnection, 0)
+	for _, userConnections := range h.connections {
+		for _, conn := range userConnections {
+			result = append(result, conn)
+		}
+	}
+	return result
 }
 
 func (h *WSHub) connectionsForUsers(userIDs []int64) []*WSConnection {

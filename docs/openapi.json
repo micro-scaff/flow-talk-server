@@ -46,7 +46,7 @@
     },
     {
       "name": "在线状态",
-      "description": "本机在线状态查询"
+      "description": "在线状态查询；启用 Redis 后返回跨实例全局在线状态"
     },
     {
       "name": "消息搜索",
@@ -478,7 +478,7 @@
           "WebSocket"
         ],
         "summary": "建立 WebSocket 连接",
-        "description": "地址格式：GET /api/ws?token={jwt}&device_id={device_id}。事件格式统一为 {type, request_id, payload}，支持 ping、message.send、message.ack、message.deliver、error。聊天页面发送消息应优先使用 message.send，不要同时调用 HTTP 发送接口。客户端发送前生成稳定 client_msg_id，本地插入 sending 消息；收到 message.ack 后用 ack.payload.client_msg_id 或 ack.payload.id 替换本地消息；收到 message.deliver 后按 id 去重，当前会话追加到消息列表，非当前会话刷新会话列表。WebSocket 不可用或 ack 超时时，可以使用同一个 client_msg_id 调用 HTTP 发送接口降级。",
+        "description": "地址格式：GET /api/ws?token={jwt}&device_id={device_id}。事件格式统一为 {type, request_id, payload}，支持 ping、message.send、message.ack、message.deliver、presence.changed、conversation.unread.changed、error。客户端每 25-30 秒发送 ping，服务端 75 秒没有收到事件会回收连接。聊天页面发送消息应优先使用 message.send，不要同时调用 HTTP 发送接口。收到 conversation.unread.changed 后必须用服务端 unread_count 替换本地数量，不要自行 +1/-1。登录初始化和 WebSocket 重连后应重新获取会话与 presence HTTP 快照。",
         "parameters": [
           {
             "name": "token",
@@ -1461,7 +1461,7 @@
           "消息"
         ],
         "summary": "更新会话已读位置",
-        "description": "通过请求体传入会话 ID 和最后已读消息 ID，用于更新当前用户在会话内的已读位置。",
+        "description": "通过请求体传入会话 ID 和最后已读消息 ID，用于更新当前用户在会话内的已读位置。响应包含权威未读数，同时向当前用户全部在线连接推送 conversation.unread.changed。",
         "operationId": "markConversationRead",
         "security": [
           {
@@ -2177,6 +2177,17 @@
             "type": "integer",
             "format": "int64",
             "example": 3
+          },
+          "last_read_message_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001
+          },
+          "unread_revision": {
+            "type": "integer",
+            "format": "int64",
+            "example": 2005,
+            "description": "会话未读状态的单调版本，增量事件 revision 小于该值时应丢弃"
           }
         }
       },
@@ -2373,6 +2384,22 @@
           "last_read_at": {
             "type": "string",
             "example": "2026-06-29T12:05:00+08:00"
+          },
+          "unread_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 0
+          },
+          "last_message_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "example": 2002,
+            "description": "conversation.unread.changed 的单调版本"
           }
         }
       },
@@ -2615,6 +2642,12 @@
           "last_seen_at": {
             "type": "string",
             "example": "2026-06-29T12:00:00+08:00"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "example": 15,
+            "description": "presence.changed 的单调版本"
           }
         }
       },

@@ -17,6 +17,10 @@ const (
 	WSEventMessageAck = "message.ack"
 	// WSEventMessageDeliver 表示服务端向在线成员实时投递消息。
 	WSEventMessageDeliver = "message.deliver"
+	// WSEventPresenceChanged 表示某个用户的在线连接状态发生变化。
+	WSEventPresenceChanged = "presence.changed"
+	// WSEventConversationUnreadChanged 表示当前用户某个会话的权威未读状态发生变化。
+	WSEventConversationUnreadChanged = "conversation.unread.changed"
 	// WSEventError 表示某个 WebSocket 请求事件处理失败。
 	WSEventError = "error"
 )

@@ -160,6 +160,14 @@ instance_id =
 
 如果 MySQL 不在本机，修改 `host`、`port`、`username`、`password`。
 
+Redis 默认关闭。单实例部署可以保持 `enabled=false`；多实例部署建议开启 Redis。`channel` 是实时消息投递的基础频道，服务端会自动派生：
+
+- `channel`：`message.deliver`
+- `channel + ":presence"`：`presence.changed`
+- `channel + ":conversation_unread"`：`conversation.unread.changed`
+
+`presence_ttl` 要大于客户端心跳间隔；当前前端建议 25 到 30 秒发送一次 `ping`，服务端 75 秒无事件会回收连接，生产环境建议保持 `presence_ttl=90s` 或更高。
+
 ## 5. 启动服务
 
 这里启动的是已经编译好的二进制文件 `flow-talk-server`。只要配置文件和数据库连接正常，运行服务本身不再依赖 `go` 命令。

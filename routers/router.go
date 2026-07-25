@@ -48,11 +48,22 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	}); err != nil {
 		log.Printf("订阅实时投递事件失败: %v", err)
 	}
+	if err := realtimeBus.SubscribePresenceChanged(func(event models.PresenceChangedEvent) {
+		controllers.DeliverPresenceChangedToLocalHub(wsHub, event)
+	}); err != nil {
+		log.Printf("订阅在线状态事件失败: %v", err)
+	}
+	if err := realtimeBus.SubscribeConversationUnreadChanged(func(event models.ConversationUnreadChangedEvent) {
+		controllers.DeliverConversationUnreadChangedToLocalHub(wsHub, event)
+	}); err != nil {
+		log.Printf("订阅会话未读事件失败: %v", err)
+	}
 	wsController := controllers.WSController{
-		JWT:             cfg.JWT,
-		Hub:             wsHub,
-		Bus:             realtimeBus,
-		PresenceTracker: presenceTracker,
+		JWT:              cfg.JWT,
+		Hub:              wsHub,
+		Bus:              realtimeBus,
+		PresenceTracker:  presenceTracker,
+		PresenceProvider: presenceProvider,
 	}
 	messageController = controllers.MessageController{
 		Hub: wsHub,

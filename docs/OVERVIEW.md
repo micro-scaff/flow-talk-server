@@ -133,13 +133,14 @@ WebSocket 连接由单进程 `WSHub` 管理。一个用户可以同时有多条�
 - 在线成员：通过本进程 WebSocket 连接实时投递
 - 慢连接：发送队列满时放弃本次实时投递
 - 离线成员：不实时投递，依靠历史消息、会话列表和未读数补齐
-- 多实例：启用 Redis 后通过 `RealtimeBus` 发布 `message.deliver`，每个节点订阅后只投递自己的本机连接
+- 多实例：启用 Redis 后通过 `RealtimeBus` 发布 `message.deliver`、`presence.changed` 和 `conversation.unread.changed`，每个节点订阅后只投递自己的本机连接
 
 Redis 用于跨节点协同，但不替代本机 WebSocket 连接管理：
 
 - 本机 `WSHub`：继续保存真实 WebSocket 连接、发送队列和连接生命周期
-- Redis Pub/Sub：广播 `message.deliver` 等跨节点实时事件
+- Redis Pub/Sub：广播 `message.deliver`、`presence.changed`、`conversation.unread.changed` 等跨节点实时事件
 - Redis TTL key 或 ZSET：记录用户在线连接快照，支撑全局在线状态查询
+- `redis.channel` 是消息投递基础频道；在线状态和未读状态分别使用派生频道 `redis.channel + ":presence"`、`redis.channel + ":conversation_unread"`
 - MySQL：继续保存消息、会话、成员、回执等最终业务状态
 
 ## 数据模型
@@ -365,7 +366,7 @@ POST   /api/messages/unread
 
 兼容旧客户端只传 `user_ids` 的请求，此时按 `specified` 处理。
 
-批量接口返回用户资料和在线状态的合并列表，包括 `id`、`username`、`nickname`、`avatar_url`、`status`、`user_id`、`online` 和 `connection_count` 等字段。前端传 `type=all` 后可直接渲染全部人员，无需再调用用户详情接口。
+批量接口返回用户资料和在线状态的合并列表，包括 `id`、`username`、`nickname`、`avatar_url`、`status`、`user_id`、`online`、`connection_count` 和 `revision` 等字段。前端传 `type=all` 后可直接渲染全部人员，无需再调用用户详情接口。
 
 消息回执接口中，`message_id` 不放在 URL 路径中，统一放到请求 body。当前只保留已读和未读两种状态。
 
@@ -380,7 +381,7 @@ POST   /api/messages/unread
 ```text
 POST /api/resources/upload
 GET  /api/users?all=true
-GET  /api/ws
+GET  /api/ws?token={jwt}&device_id={device_id}
 ```
 
 用户列表支持查询参数：`all=true` 表示读取全部用户；不传 `all` 时可用 `limit`、`offset` 分页；`keyword` 可搜索用户名、昵称和外部 ID；`status`、`auth_source` 可按状态和来源过滤。
@@ -496,7 +497,7 @@ GET /api/ws?token={jwt}&device_id={device_id}
 1. 发送前生成稳定 `client_msg_id`，先在当前会话插入一条本地 `sending` 消息。
 2. WebSocket 可用时发送 `message.send`，不要再同时调用 HTTP 发送接口，避免重复请求。
 3. 收到 `message.ack` 后，用 `client_msg_id` 或服务端 `id` 把本地 `sending` 消息替换为服务端消息。
-4. 收到 `message.deliver` 后，按 `id` 去重；如果属于当前会话则追加到消息列表，否则只刷新会话列表未读数和最后消息。
+4. 收到 `message.deliver` 后，按 `id` 去重；如果属于当前会话则追加到消息列表，否则只刷新会话列表最后消息。
 5. 如果 WebSocket 未连接或发送超时，可以使用同一个 `client_msg_id` 走 HTTP 发送接口降级；服务端会按 `(sender_id, client_msg_id)` 幂等。
 6. 没收到 `message.ack` 时，客户端可以使用同一个 `client_msg_id` 重试，不要生成新的 `client_msg_id`。
 
@@ -546,7 +547,8 @@ GET /api/ws?token={jwt}&device_id={device_id}
 3. 服务端用 `(sender_id, client_msg_id)` 做幂等。
 4. 服务端写入 `messages` 并更新会话最后消息。
 5. 服务端向在线 active 成员实时投递 `message.deliver`。
-6. 离线成员上线后通过会话列表未读数和历史消息补齐。
+6. 服务端向每个接收者推送其权威 `conversation.unread.changed`，客户端直接替换本地未读数。
+7. 离线成员上线后通过会话列表未读数和历史消息补齐。
 
 ### 标记已读
 
@@ -554,6 +556,7 @@ GET /api/ws?token={jwt}&device_id={device_id}
 2. 服务端校验当前用户是 active 成员。
 3. 服务端校验 `last_read_message_id` 属于当前会话。
 4. 只在新游标大于旧游标时更新 `conversation_members.last_read_message_id`。
+5. 服务端重新计算权威未读状态，并向当前用户全部在线设备推送 `conversation.unread.changed`。
 
 ## 落地注意事项
 
@@ -564,6 +567,8 @@ GET /api/ws?token={jwt}&device_id={device_id}
 - Redis 未启用时，在线状态只代表本进程视角，实时投递只覆盖本进程内连接。
 - 多实例部署时建议启用 Redis；如果需要可重放投递或更强消费确认，可继续演进到 Redis Streams、MQ 或独立 WebSocket 网关。
 - 当前未读数基于已读游标计算，数据量变大后可以再做缓存或冗余计数。
+- WebSocket 连接 75 秒没有收到应用事件会被服务端回收；客户端应每 25 到 30 秒发送一次 `ping`。
+- `presence.changed` 和 `conversation.unread.changed` 是增量通知；登录初始化、重连和页面重新可见时仍应使用 HTTP 快照校准。
 - 当前本地密码保存方式只适合开发阶段，正式环境应迁移到哈希存储。
 
 ## 后续扩展方向

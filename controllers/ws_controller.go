@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -19,14 +20,17 @@ const (
 	wsWriteWait = 10 * time.Second
 	// wsReadLimit 限制单个事件大小。当前消息只保存 JSON 元数据，不接收二进制正文。
 	wsReadLimit = 64 * 1024
+	// wsReadTimeout 要大于前端 25-30 秒的应用层心跳间隔，用于回收断网后的僵尸连接。
+	wsReadTimeout = 75 * time.Second
 )
 
 // WSController 处理 WebSocket 建连和事件分发。
 type WSController struct {
-	JWT             models.JWTConfig
-	Hub             *models.WSHub
-	Bus             models.RealtimeBus
-	PresenceTracker models.PresenceTracker
+	JWT              models.JWTConfig
+	Hub              *models.WSHub
+	Bus              models.RealtimeBus
+	PresenceTracker  models.PresenceTracker
+	PresenceProvider models.PresenceProvider
 }
 
 var wsUpgrader = websocket.Upgrader{
@@ -51,9 +55,12 @@ func (ctl WSController) Connect(c *gin.Context) {
 
 	wsConn := models.NewWSConnection(user.ID, strings.TrimSpace(c.Query("device_id")))
 	ctl.Hub.Add(wsConn)
-	_ = ctl.presenceTracker().AddConnection(wsConn)
+	if err := ctl.presenceTracker().AddConnection(wsConn); err != nil {
+		log.Printf("记录 WebSocket 上线状态失败: user_id=%d err=%v", user.ID, err)
+	}
 	// 设备表属于 v5 能力；这里忽略“不存在设备”的错误，让纯 WebSocket 调试不被设备上报流程阻塞。
 	_ = models.TouchUserDevice(user.ID)
+	ctl.publishCurrentPresence(user.ID)
 
 	// 写循环独立 goroutine，从 wsConn.Send 队列取消息写回客户端。
 	// 读循环留在当前请求 goroutine 中，直到连接断开后触发 defer 清理。
@@ -89,15 +96,24 @@ func (ctl WSController) readLoop(user models.User, socket *websocket.Conn, wsCon
 	defer func() {
 		// 任何读错误、客户端断开或服务端关闭都会走这里，确保 Hub 不保留脏连接。
 		ctl.Hub.Remove(wsConn.UserID, wsConn.ID)
-		_ = ctl.presenceTracker().RemoveConnection(wsConn)
+		if err := ctl.presenceTracker().RemoveConnection(wsConn); err != nil {
+			log.Printf("记录 WebSocket 下线状态失败: user_id=%d err=%v", wsConn.UserID, err)
+		}
+		ctl.publishCurrentPresence(wsConn.UserID)
 		_ = socket.Close()
 	}()
 
 	// 限制单个 JSON 事件大小，避免恶意客户端通过超大帧占用内存。
 	socket.SetReadLimit(wsReadLimit)
+	if err := socket.SetReadDeadline(time.Now().Add(wsReadTimeout)); err != nil {
+		return
+	}
 	for {
 		_, payload, err := socket.ReadMessage()
 		if err != nil {
+			return
+		}
+		if err := socket.SetReadDeadline(time.Now().Add(wsReadTimeout)); err != nil {
 			return
 		}
 
@@ -116,6 +132,8 @@ func (ctl WSController) readLoop(user models.User, socket *websocket.Conn, wsCon
 }
 
 func (ctl WSController) writeLoop(socket *websocket.Conn, wsConn *models.WSConnection) {
+	// 写失败时主动关闭 socket，让阻塞中的 ReadMessage 立即返回并执行统一下线清理。
+	defer func() { _ = socket.Close() }()
 	for payload := range wsConn.Send {
 		// 每次写入都设置 deadline，防止客户端网络异常时 WriteMessage 永久阻塞。
 		if err := socket.SetWriteDeadline(time.Now().Add(wsWriteWait)); err != nil {
@@ -170,18 +188,10 @@ func (ctl WSController) handleMessageSend(user models.User, event models.WSEvent
 		return
 	}
 
-	if err := ctl.publishMessageDeliver(models.MessageDeliverEvent{
-		UserIDs: memberIDs,
-		Message: message,
-	}); err != nil {
+	if err := publishCreatedMessageUpdates(ctl.Bus, ctl.Hub, memberIDs, message); err != nil {
 		wsConn.SendEvent(models.NewWSErrorEvent(event.RequestID, "消息已保存，实时投递失败"))
 		return
 	}
-}
-
-func (ctl WSController) publishMessageDeliver(event models.MessageDeliverEvent) error {
-	// controller 方法保留一层包装，便于测试时直接替换 Bus/Hub 组合。
-	return publishMessageDeliver(ctl.Bus, ctl.Hub, event)
 }
 
 func (ctl WSController) presenceTracker() models.PresenceTracker {
@@ -191,6 +201,24 @@ func (ctl WSController) presenceTracker() models.PresenceTracker {
 		return ctl.PresenceTracker
 	}
 	return models.NoopPresenceTracker{}
+}
+
+func (ctl WSController) presenceProvider() models.PresenceProvider {
+	if ctl.PresenceProvider != nil {
+		return ctl.PresenceProvider
+	}
+	return models.NewHubPresenceProvider(ctl.Hub)
+}
+
+func (ctl WSController) publishCurrentPresence(userID int64) {
+	presence, err := models.GetUserPresence(ctl.presenceProvider(), userID)
+	if err != nil {
+		log.Printf("读取 WebSocket 在线状态失败: user_id=%d err=%v", userID, err)
+		return
+	}
+	if err := publishPresenceChanged(ctl.Bus, ctl.Hub, models.PresenceChangedEvent{Presence: presence}); err != nil {
+		log.Printf("发布 WebSocket 在线状态失败: user_id=%d err=%v", userID, err)
+	}
 }
 
 // DeliverMessageToLocalHub 把实时投递事件转换成 WebSocket message.deliver。
@@ -204,6 +232,22 @@ func DeliverMessageToLocalHub(hub *models.WSHub, event models.MessageDeliverEven
 	hub.BroadcastEventToUsers(event.UserIDs, deliverEvent)
 }
 
+// DeliverPresenceChangedToLocalHub 把在线状态变化广播到当前实例的全部登录连接。
+func DeliverPresenceChangedToLocalHub(hub *models.WSHub, event models.PresenceChangedEvent) {
+	if hub == nil {
+		return
+	}
+	hub.BroadcastEventToAll(models.NewWSEvent(models.WSEventPresenceChanged, "", event.Presence))
+}
+
+// DeliverConversationUnreadChangedToLocalHub 只同步给目标用户的全部本机连接。
+func DeliverConversationUnreadChangedToLocalHub(hub *models.WSHub, event models.ConversationUnreadChangedEvent) {
+	if hub == nil {
+		return
+	}
+	hub.BroadcastEventToUsers([]int64{event.UserID}, models.NewWSEvent(models.WSEventConversationUnreadChanged, "", event.State))
+}
+
 func publishMessageDeliver(bus models.RealtimeBus, hub *models.WSHub, event models.MessageDeliverEvent) error {
 	// bus 为空时直接走本机 Hub，方便单元测试和最小化单进程部署。
 	// 正常启动时路由层会注入 MemoryRealtimeBus 或 RedisRealtimeBus。
@@ -212,6 +256,46 @@ func publishMessageDeliver(bus models.RealtimeBus, hub *models.WSHub, event mode
 		return nil
 	}
 	return bus.PublishMessageDeliver(event)
+}
+
+func publishPresenceChanged(bus models.RealtimeBus, hub *models.WSHub, event models.PresenceChangedEvent) error {
+	if bus == nil {
+		DeliverPresenceChangedToLocalHub(hub, event)
+		return nil
+	}
+	return bus.PublishPresenceChanged(event)
+}
+
+func publishConversationUnreadChanged(bus models.RealtimeBus, hub *models.WSHub, event models.ConversationUnreadChangedEvent) error {
+	if bus == nil {
+		DeliverConversationUnreadChangedToLocalHub(hub, event)
+		return nil
+	}
+	return bus.PublishConversationUnreadChanged(event)
+}
+
+// publishCreatedMessageUpdates 先投递消息，再给每个接收者发送其权威未读状态。
+// 发送者会收到 message.deliver 用于多端同步，但自己发送的消息不会增加未读数。
+func publishCreatedMessageUpdates(bus models.RealtimeBus, hub *models.WSHub, memberIDs []int64, message models.MessageDTO) error {
+	if err := publishMessageDeliver(bus, hub, models.MessageDeliverEvent{UserIDs: memberIDs, Message: message}); err != nil {
+		return err
+	}
+	for _, userID := range memberIDs {
+		if userID == message.SenderID {
+			continue
+		}
+		state, err := models.GetConversationUnreadState(userID, message.ConversationID)
+		if err != nil {
+			return err
+		}
+		if err := publishConversationUnreadChanged(bus, hub, models.ConversationUnreadChangedEvent{
+			UserID: userID,
+			State:  state,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func wsMessageForError(err error) string {

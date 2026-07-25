@@ -106,16 +106,29 @@ type ConversationDTO struct {
 }
 
 type ConversationListItemDTO struct {
-	ID            int64       `json:"id"`
-	Type          string      `json:"type"`
-	Title         string      `json:"title"`
-	AvatarURL     string      `json:"avatar_url"`
-	OwnerID       int64       `json:"owner_id"`
-	MemberCount   int64       `json:"member_count"`
-	LastMessageID int64       `json:"last_message_id"`
-	LastMessageAt string      `json:"last_message_at"`
-	LastMessage   *MessageDTO `json:"last_message,omitempty"`
-	UnreadCount   int64       `json:"unread_count"`
+	ID                int64       `json:"id"`
+	Type              string      `json:"type"`
+	Title             string      `json:"title"`
+	AvatarURL         string      `json:"avatar_url"`
+	OwnerID           int64       `json:"owner_id"`
+	MemberCount       int64       `json:"member_count"`
+	LastMessageID     int64       `json:"last_message_id"`
+	LastMessageAt     string      `json:"last_message_at"`
+	LastMessage       *MessageDTO `json:"last_message,omitempty"`
+	LastReadMessageID int64       `json:"last_read_message_id"`
+	UnreadCount       int64       `json:"unread_count"`
+	UnreadRevision    int64       `json:"unread_revision"`
+}
+
+// ConversationUnreadStateDTO 是服务端下发给当前用户的权威会话未读状态。
+// Revision 由只增不减的最后消息 ID 与已读游标共同计算，无需额外冗余计数列。
+type ConversationUnreadStateDTO struct {
+	ConversationID    int64  `json:"conversation_id"`
+	UnreadCount       int64  `json:"unread_count"`
+	LastMessageID     int64  `json:"last_message_id"`
+	LastReadMessageID int64  `json:"last_read_message_id"`
+	LastReadAt        string `json:"last_read_at,omitempty"`
+	Revision          int64  `json:"revision"`
 }
 
 type ConversationDetailDTO struct {
@@ -255,7 +268,7 @@ func ListConversations(userID int64) ([]ConversationListItemDTO, error) {
 	// 这样 SQL 更容易读；后续会话量很大时再做批量优化。
 	var rows []conversationListRow
 	err := DB.Table("conversation_members AS cm").
-		Select(`c.id, c.type, c.title, c.avatar_url, c.owner_id, c.last_message_id, c.last_message_at,
+		Select(`c.id, c.type, c.title, c.avatar_url, c.owner_id, c.last_message_id, c.last_message_at, cm.last_read_message_id,
 			(SELECT COUNT(*) FROM conversation_members cm2 WHERE cm2.conversation_id = c.id AND cm2.status = ?) AS member_count`, MemberStatusActive).
 		Joins("JOIN conversations c ON c.id = cm.conversation_id").
 		Where("cm.user_id = ? AND cm.status = ?", userID, MemberStatusActive).
@@ -630,27 +643,29 @@ func (m ConversationMember) ToDTO() ConversationMemberDTO {
 // conversationListRow 是会话列表 SQL 的扫描目标。
 // 独立于 Conversation 可以避免把 member_count 这种查询派生字段塞进表模型。
 type conversationListRow struct {
-	ID            int64
-	Type          string
-	Title         *string
-	AvatarURL     *string
-	OwnerID       *int64
-	LastMessageID *int64
-	LastMessageAt *time.Time
-	MemberCount   int64
+	ID                int64
+	Type              string
+	Title             *string
+	AvatarURL         *string
+	OwnerID           *int64
+	LastMessageID     *int64
+	LastMessageAt     *time.Time
+	LastReadMessageID *int64
+	MemberCount       int64
 }
 
 // ToDTO 把列表查询行转换成稳定的响应结构。
 func (r conversationListRow) ToDTO(userID int64) (ConversationListItemDTO, error) {
 	item := ConversationListItemDTO{
-		ID:            r.ID,
-		Type:          r.Type,
-		Title:         stringValue(r.Title),
-		AvatarURL:     stringValue(r.AvatarURL),
-		OwnerID:       int64Value(r.OwnerID),
-		MemberCount:   r.MemberCount,
-		LastMessageID: int64Value(r.LastMessageID),
-		LastMessageAt: timeString(r.LastMessageAt),
+		ID:                r.ID,
+		Type:              r.Type,
+		Title:             stringValue(r.Title),
+		AvatarURL:         stringValue(r.AvatarURL),
+		OwnerID:           int64Value(r.OwnerID),
+		MemberCount:       r.MemberCount,
+		LastMessageID:     int64Value(r.LastMessageID),
+		LastMessageAt:     timeString(r.LastMessageAt),
+		LastReadMessageID: int64Value(r.LastReadMessageID),
 	}
 
 	lastMessage, err := findOptionalLastMessage(r.LastMessageID)
@@ -664,7 +679,53 @@ func (r conversationListRow) ToDTO(userID int64) (ConversationListItemDTO, error
 		return ConversationListItemDTO{}, err
 	}
 	item.UnreadCount = unreadCount
+	item.UnreadRevision = unreadRevision(item.LastMessageID, item.LastReadMessageID)
 	return item, nil
+}
+
+// GetConversationUnreadState 返回某个用户在会话中的权威未读状态。
+// 新消息和标记已读完成后都调用它，避免客户端用 +1/-1 猜测最终数量。
+func GetConversationUnreadState(userID int64, conversationID int64) (ConversationUnreadStateDTO, error) {
+	var state ConversationUnreadStateDTO
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		member, err := ensureActiveMemberWithDB(tx, userID, conversationID)
+		if err != nil {
+			return err
+		}
+
+		var conversation Conversation
+		if err := tx.Select("id", "last_message_id").First(&conversation, conversationID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrConversationNotFound
+			}
+			return err
+		}
+
+		unreadCount, err := countUnreadMessagesWithDB(tx, userID, conversationID)
+		if err != nil {
+			return err
+		}
+		lastMessageID := int64Value(conversation.LastMessageID)
+		lastReadMessageID := int64Value(member.LastReadMessageID)
+		state = ConversationUnreadStateDTO{
+			ConversationID:    conversationID,
+			UnreadCount:       unreadCount,
+			LastMessageID:     lastMessageID,
+			LastReadMessageID: lastReadMessageID,
+			LastReadAt:        timeString(member.LastReadAt),
+			Revision:          unreadRevision(lastMessageID, lastReadMessageID),
+		}
+		return nil
+	})
+	if err != nil {
+		return ConversationUnreadStateDTO{}, fmt.Errorf("查询会话未读状态失败: %w", err)
+	}
+	return state, nil
+}
+
+func unreadRevision(lastMessageID int64, lastReadMessageID int64) int64 {
+	// 两个输入都只增不减，因此它们的和也是稳定的单调版本号。
+	return lastMessageID + lastReadMessageID
 }
 
 func findDirectConversationByKey(directKey string) (Conversation, error) {
@@ -697,8 +758,12 @@ func findOptionalLastMessage(lastMessageID *int64) (*MessageDTO, error) {
 // countUnreadMessages 根据成员的 last_read_message_id 计算未读数。
 // 自己发送的消息不计入未读，撤回/删除后的非 normal 消息也不计入未读。
 func countUnreadMessages(userID int64, conversationID int64) (int64, error) {
+	return countUnreadMessagesWithDB(DB, userID, conversationID)
+}
+
+func countUnreadMessagesWithDB(db *gorm.DB, userID int64, conversationID int64) (int64, error) {
 	var count int64
-	err := DB.Table("messages AS m").
+	err := db.Table("messages AS m").
 		Joins("JOIN conversation_members cm ON cm.conversation_id = m.conversation_id").
 		Where("cm.conversation_id = ? AND cm.user_id = ? AND cm.status = ?", conversationID, userID, MemberStatusActive).
 		Where("m.sender_id <> ?", userID).

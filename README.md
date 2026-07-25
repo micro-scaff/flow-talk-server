@@ -108,7 +108,7 @@ http://localhost:8080
 WebSocket 入口：
 
 ```text
-ws://localhost:8080/api/ws
+ws://localhost:8080/api/ws?token={jwt}&device_id={device_id}
 ```
 
 ## 常用命令
@@ -134,17 +134,29 @@ GET  /api/me
 GET  /api/conversations
 POST /api/conversations/direct
 POST /api/conversations/groups
-GET  /api/conversations/:conversation_id/messages
-POST /api/conversations/:conversation_id/messages  HTTP 降级发送
+POST /api/conversations/detail
+POST /api/conversations/messages       HTTP 降级发送
+POST /api/conversations/messages/list
+POST /api/conversations/read
 POST /api/devices
 GET  /api/devices
 DELETE /api/devices
 POST /api/resources/upload
 GET  /api/users?all=true
-GET  /api/ws
+POST /api/users/presence
+POST /api/users/presence/batch
+GET  /api/ws?token={jwt}&device_id={device_id}
 ```
 
 聊天页面发送消息首选 WebSocket `/api/ws` 的 `message.send` 事件；HTTP 发送接口主要用于调试、脚本和 WebSocket 不可用时的降级。
+
+实时状态通过 WebSocket 增量事件同步：
+
+- `message.deliver`：向会话 active 成员投递新消息，前端按消息 `id/client_msg_id` 去重。
+- `presence.changed`：在线状态变化，前端按 `user_id` 和 `revision` 应用。
+- `conversation.unread.changed`：会话未读数变化，前端用服务端 `unread_count` 直接替换本地值，不做 `+1/-1`。
+
+启用 Redis 后，`redis.channel` 是实时消息基础频道；服务端会派生 `:presence` 和 `:conversation_unread` 两个频道分别同步在线状态和未读状态。HTTP 快照仍是初始化、重连和页面重新可见后的校准来源。
 
 完整接口以路由文件 [routers/router.go](./routers/router.go)、[docs/openapi.json](./docs/openapi.json) 和 [前端对接文档](./docs/前端对接文档.md) 为准。
 

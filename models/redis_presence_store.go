@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -50,7 +51,13 @@ func NewRedisPresenceStore(client *redis.Client, cfg RedisConfig) *RedisPresence
 
 // AddConnection 记录一条新 WebSocket 连接，并设置 TTL。
 func (s *RedisPresenceStore) AddConnection(conn *WSConnection) error {
-	return s.writeConnection(conn)
+	if s == nil || s.client == nil || conn == nil {
+		return nil
+	}
+	if err := s.writeConnection(conn); err != nil {
+		return err
+	}
+	return s.client.Incr(redisContext(), s.revisionKey(conn.UserID)).Err()
 }
 
 // TouchConnection 刷新连接快照和 TTL，用于心跳或任意客户端事件。
@@ -64,10 +71,13 @@ func (s *RedisPresenceStore) RemoveConnection(conn *WSConnection) error {
 		return nil
 	}
 	ctx := redisContext()
-	if err := s.client.Del(ctx, s.connectionKey(conn.UserID, conn.ID)).Err(); err != nil {
-		return err
-	}
-	return s.client.ZRem(ctx, s.connectionsKey(conn.UserID), conn.ID).Err()
+	_, err := s.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.Del(ctx, s.connectionKey(conn.UserID, conn.ID))
+		pipe.ZRem(ctx, s.connectionsKey(conn.UserID), conn.ID)
+		pipe.Incr(ctx, s.revisionKey(conn.UserID))
+		return nil
+	})
+	return err
 }
 
 // Presence 汇总 Redis 中某个用户的连接快照。
@@ -111,8 +121,16 @@ func (s *RedisPresenceStore) Presence(userID int64) (PresenceDTO, error) {
 		}
 	}
 	if len(staleConnectionIDs) > 0 {
-		// 清理陈旧索引失败不影响本次在线状态结果，因此忽略错误。
-		_ = s.client.ZRem(ctx, s.connectionsKey(userID), staleConnectionIDs...).Err()
+		// TTL 到期也属于一次状态变化。清理索引时推进 revision，保证后续快照不会被旧状态覆盖。
+		_, _ = s.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.ZRem(ctx, s.connectionsKey(userID), staleConnectionIDs...)
+			pipe.Incr(ctx, s.revisionKey(userID))
+			return nil
+		})
+	}
+	revision, err := s.client.Get(ctx, s.revisionKey(userID)).Int64()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return PresenceDTO{}, err
 	}
 
 	return PresenceDTO{
@@ -120,6 +138,7 @@ func (s *RedisPresenceStore) Presence(userID int64) (PresenceDTO, error) {
 		Online:          connectionCount > 0,
 		ConnectionCount: connectionCount,
 		LastActiveAt:    formatOptionalTime(lastActive),
+		Revision:        revision,
 	}, nil
 }
 
@@ -150,7 +169,6 @@ func (s *RedisPresenceStore) writeConnection(conn *WSConnection) error {
 	}
 
 	now := time.Now()
-	conn.LastActiveAt = now
 	ctx := redisContext()
 	key := s.connectionKey(conn.UserID, conn.ID)
 	values := map[string]any{
@@ -185,4 +203,9 @@ func (s *RedisPresenceStore) connectionKey(userID int64, connectionID string) st
 // connectionsKey 是某个用户全部连接 ID 的 ZSET key。
 func (s *RedisPresenceStore) connectionsKey(userID int64) string {
 	return fmt.Sprintf("%s:presence:user:%d:connections", s.keyPrefix, userID)
+}
+
+// revisionKey 保存用户在线状态的单调版本号，供客户端丢弃乱序增量事件。
+func (s *RedisPresenceStore) revisionKey(userID int64) string {
+	return fmt.Sprintf("%s:presence:user:%d:revision", s.keyPrefix, userID)
 }
