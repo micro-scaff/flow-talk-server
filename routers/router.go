@@ -114,7 +114,9 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		{
 			// 正式用户列表接口，前端通讯录初始化通过 all=true 显式读取全量用户。
 			users.GET("", userController.Index)
+			// 查询单个指定用户的在线状态，请求体传入 user_id。
 			users.POST("/presence", presenceController.Show)
+			// 查询全部、在线、离线或指定用户，同时返回前端展示所需的用户资料和在线状态。
 			users.POST("/presence/batch", presenceController.Batch)
 		}
 

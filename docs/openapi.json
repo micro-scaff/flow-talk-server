@@ -763,7 +763,13 @@
         "tags": [
           "在线状态"
         ],
-        "summary": "批量获取用户在线状态",
+        "summary": "获取在线人员列表",
+        "operationId": "listUserPresence",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -771,18 +777,36 @@
               "schema": {
                 "$ref": "#/components/schemas/BatchPresenceRequest"
               },
-              "example": {
-                "user_ids": [
-                  1,
-                  2
-                ]
+              "examples": {
+                "all": {
+                  "summary": "读取所有用户",
+                  "value": {
+                    "type": "all"
+                  }
+                },
+                "online": {
+                  "summary": "查询在线人员",
+                  "value": {
+                    "type": "online"
+                  }
+                },
+                "specified": {
+                  "summary": "查询指定人员",
+                  "value": {
+                    "type": "specified",
+                    "user_ids": [
+                      1,
+                      2
+                    ]
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "获取在线状态成功",
+            "description": "获取在线人员成功",
             "content": {
               "application/json": {
                 "schema": {
@@ -795,14 +819,43 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/Presence"
+                        "$ref": "#/components/schemas/UserPresence"
                       }
                     },
                     "message": {
                       "type": "string",
-                      "example": "获取在线状态成功"
+                      "example": "获取在线人员成功"
                     }
                   }
+                },
+                "example": {
+                  "code": 200,
+                  "data": [
+                    {
+                      "id": 1,
+                      "user_id": 1,
+                      "username": "alice",
+                      "nickname": "Alice",
+                      "avatar_url": "https://example.com/avatar.png",
+                      "auth_source": "local",
+                      "status": 1,
+                      "online": true,
+                      "connection_count": 1,
+                      "last_active_at": "2026-06-29T12:00:00+08:00"
+                    },
+                    {
+                      "id": 2,
+                      "user_id": 2,
+                      "username": "bob",
+                      "nickname": "Bob",
+                      "auth_source": "local",
+                      "status": 1,
+                      "online": false,
+                      "connection_count": 0,
+                      "last_seen_at": "2026-06-29T11:00:00+08:00"
+                    }
+                  ],
+                  "message": "获取在线人员成功"
                 }
               }
             }
@@ -810,11 +863,14 @@
           "400": {
             "$ref": "#/components/responses/ValidationError"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
         },
-        "description": "通过请求体传入 user_ids，批量获取在线状态。"
+        "description": "返回用户资料和在线状态，前端可直接渲染人员列表。通过 type 选择人员范围：all 全部、online 在线、offline 离线、specified 指定人员。specified 需要同时传入 user_ids；兼容旧客户端只传 user_ids 的请求。"
       }
     },
     "/api/resources/upload": {
@@ -2562,14 +2618,38 @@
           }
         }
       },
+      "UserPresence": {
+        "type": "object",
+        "description": "用户资料和在线状态的合并结构",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/User"
+          },
+          {
+            "$ref": "#/components/schemas/Presence"
+          }
+        ]
+      },
       "BatchPresenceRequest": {
         "type": "object",
         "required": [
-          "user_ids"
+          "type"
         ],
         "properties": {
+          "type": {
+            "type": "string",
+            "description": "人员范围：all 全部、online 在线、offline 离线、specified 指定人员",
+            "enum": [
+              "all",
+              "online",
+              "offline",
+              "specified"
+            ],
+            "example": "all"
+          },
           "user_ids": {
             "type": "array",
+            "description": "type=specified 时必传的用户 ID 列表",
             "items": {
               "type": "integer",
               "format": "int64"

@@ -1,5 +1,26 @@
 package models
 
+import (
+	"errors"
+	"fmt"
+)
+
+// PresenceQueryType 是批量在线状态接口的人员范围枚举。
+type PresenceQueryType string
+
+const (
+	// PresenceQueryAll 查询全部人员。
+	PresenceQueryAll PresenceQueryType = "all"
+	// PresenceQueryOnline 只查询在线人员。
+	PresenceQueryOnline PresenceQueryType = "online"
+	// PresenceQueryOffline 只查询离线人员。
+	PresenceQueryOffline PresenceQueryType = "offline"
+	// PresenceQuerySpecified 查询 user_ids 指定的人员。
+	PresenceQuerySpecified PresenceQueryType = "specified"
+)
+
+var ErrInvalidPresenceQuery = errors.New("无效在线人员查询类型")
+
 // PresenceDTO 是用户在线状态的接口输出。
 // Online/ConnectionCount 来自当前进程内存 Hub，LastSeenAt 兼容设备表的离线最近活跃时间。
 type PresenceDTO struct {
@@ -8,6 +29,13 @@ type PresenceDTO struct {
 	ConnectionCount int    `json:"connection_count"`
 	LastActiveAt    string `json:"last_active_at,omitempty"`
 	LastSeenAt      string `json:"last_seen_at,omitempty"`
+}
+
+// UserPresenceDTO 合并用户资料和在线状态，供前端直接渲染人员列表。
+// 保留 user_id 字段兼容原批量在线状态接口，同时返回 UserDTO 的 id、昵称、头像等资料。
+type UserPresenceDTO struct {
+	UserDTO
+	PresenceDTO
 }
 
 // PresenceProvider 抽象在线状态来源。默认实现读取本机 Hub；启用 Redis 后读取全局 presence。
@@ -103,4 +131,80 @@ func BatchUserPresence(provider PresenceProvider, userIDs []int64) ([]PresenceDT
 		result = append(result, presence)
 	}
 	return result, nil
+}
+
+// QueryUserPresence 按人员范围查询用户资料及在线状态。
+// all、online、offline 从 users 表读取实际存在的用户；specified 只查询请求指定且实际存在的用户。
+func QueryUserPresence(provider PresenceProvider, queryType PresenceQueryType, userIDs []int64) ([]UserPresenceDTO, error) {
+	users, err := listPresenceUsers(queryType, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return []UserPresenceDTO{}, nil
+	}
+
+	presenceUserIDs := make([]int64, 0, len(users))
+	usersByID := make(map[int64]UserDTO, len(users))
+	for _, user := range users {
+		presenceUserIDs = append(presenceUserIDs, user.ID)
+		usersByID[user.ID] = user.ToDTO()
+	}
+
+	presences, err := BatchUserPresence(provider, presenceUserIDs)
+	if err != nil {
+		return nil, err
+	}
+	presences = filterUserPresence(presences, queryType)
+
+	result := make([]UserPresenceDTO, 0, len(presences))
+	for _, presence := range presences {
+		result = append(result, UserPresenceDTO{
+			UserDTO:     usersByID[presence.UserID],
+			PresenceDTO: presence,
+		})
+	}
+	return result, nil
+}
+
+func listPresenceUsers(queryType PresenceQueryType, userIDs []int64) ([]User, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("查询在线人员失败: 数据库未初始化")
+	}
+
+	query := DB.Model(&User{})
+	switch queryType {
+	case PresenceQuerySpecified:
+		userIDs = uniquePositiveIDs(userIDs)
+		if len(userIDs) == 0 {
+			return nil, ErrInvalidMember
+		}
+		query = query.Where("id IN ?", userIDs)
+	case PresenceQueryAll, PresenceQueryOnline, PresenceQueryOffline:
+	default:
+		return nil, ErrInvalidPresenceQuery
+	}
+
+	var users []User
+	if err := query.Order("id asc").Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("查询在线人员失败: %w", err)
+	}
+	return users, nil
+}
+
+func filterUserPresence(presences []PresenceDTO, queryType PresenceQueryType) []PresenceDTO {
+	if queryType == PresenceQueryAll || queryType == PresenceQuerySpecified {
+		return presences
+	}
+
+	result := make([]PresenceDTO, 0, len(presences))
+	for _, presence := range presences {
+		if queryType == PresenceQueryOnline && presence.Online {
+			result = append(result, presence)
+		}
+		if queryType == PresenceQueryOffline && !presence.Online {
+			result = append(result, presence)
+		}
+	}
+	return result
 }

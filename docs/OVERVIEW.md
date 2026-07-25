@@ -346,6 +346,27 @@ POST   /api/messages/unread
 }
 ```
 
+批量在线人员接口通过 `type` 选择人员范围：
+
+```json
+{
+  "type": "all"
+}
+```
+
+`type` 支持 `all`（全部）、`online`（在线）、`offline`（离线）、`specified`（指定人员）。选择 `specified` 时同时传入 `user_ids`：
+
+```json
+{
+  "type": "specified",
+  "user_ids": [1, 2, 3]
+}
+```
+
+兼容旧客户端只传 `user_ids` 的请求，此时按 `specified` 处理。
+
+批量接口返回用户资料和在线状态的合并列表，包括 `id`、`username`、`nickname`、`avatar_url`、`status`、`user_id`、`online` 和 `connection_count` 等字段。前端传 `type=all` 后可直接渲染全部人员，无需再调用用户详情接口。
+
 消息回执接口中，`message_id` 不放在 URL 路径中，统一放到请求 body。当前只保留已读和未读两种状态。
 
 ```json
