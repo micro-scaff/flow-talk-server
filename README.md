@@ -39,6 +39,7 @@ make install-fresh   安装 fresh
 make tidy            整理依赖
 make test            全包编译检查
 make vet             Go 静态检查
+make build           Go 打包
 ```
 
 如需更换 Go module 代理：
