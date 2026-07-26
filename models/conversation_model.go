@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -29,6 +30,9 @@ const (
 	// MemberStatusLeft / MemberStatusRemoved 预留给后续退出群聊、移除成员。
 	MemberStatusLeft    = "left"
 	MemberStatusRemoved = "removed"
+
+	maxGroupTitleRunes     = 128
+	maxGroupAvatarURLRunes = 255
 )
 
 var (
@@ -92,6 +96,7 @@ func (ConversationMember) TableName() string {
 	return "conversation_members"
 }
 
+// ConversationDTO 是创建会话等写接口返回的会话摘要。
 type ConversationDTO struct {
 	ID            int64                   `json:"id"`
 	Type          string                  `json:"type"`
@@ -105,9 +110,11 @@ type ConversationDTO struct {
 	Members       []ConversationMemberDTO `json:"members,omitempty"`
 }
 
+// ConversationListItemDTO 是会话列表的完整渲染模型，包含最后消息和当前用户未读状态。
 type ConversationListItemDTO struct {
 	ID                int64       `json:"id"`
 	Type              string      `json:"type"`
+	DirectKey         string      `json:"direct_key,omitempty"`
 	Title             string      `json:"title"`
 	AvatarURL         string      `json:"avatar_url"`
 	OwnerID           int64       `json:"owner_id"`
@@ -131,6 +138,7 @@ type ConversationUnreadStateDTO struct {
 	Revision          int64  `json:"revision"`
 }
 
+// ConversationDetailDTO 包含群权限判断所需的完整成员角色和状态。
 type ConversationDetailDTO struct {
 	ID        int64                   `json:"id"`
 	Type      string                  `json:"type"`
@@ -141,6 +149,7 @@ type ConversationDetailDTO struct {
 	Members   []ConversationMemberDTO `json:"members"`
 }
 
+// ConversationMemberDTO 只公开业务权限需要的成员字段，不暴露表记录主键。
 type ConversationMemberDTO struct {
 	UserID int64  `json:"user_id"`
 	Role   string `json:"role"`
@@ -226,7 +235,9 @@ func CreateGroupConversation(ownerID int64, title string, avatarURL string, memb
 	// controller 只做 binding；业务层仍要 trim，避免只传空格的群名进入数据库。
 	title = strings.TrimSpace(title)
 	avatarURL = strings.TrimSpace(avatarURL)
-	if ownerID <= 0 || title == "" {
+	if ownerID <= 0 || title == "" ||
+		utf8.RuneCountInString(title) > maxGroupTitleRunes ||
+		utf8.RuneCountInString(avatarURL) > maxGroupAvatarURLRunes {
 		return ConversationDTO{}, ErrValidation
 	}
 
@@ -264,11 +275,11 @@ func ListConversations(userID int64) ([]ConversationListItemDTO, error) {
 	if userID <= 0 {
 		return nil, ErrInvalidMember
 	}
-	// 先查会话基础信息，再逐个补最后消息和未读数。
-	// 这样 SQL 更容易读；后续会话量很大时再做批量优化。
+	// 基础会话、最后消息和未读数分别批量查询，查询次数不会随会话数量增长。
+	// 这里避免在循环中逐个查消息和 COUNT，联系人较多时仍保持稳定的数据库往返次数。
 	var rows []conversationListRow
 	err := DB.Table("conversation_members AS cm").
-		Select(`c.id, c.type, c.title, c.avatar_url, c.owner_id, c.last_message_id, c.last_message_at, cm.last_read_message_id,
+		Select(`c.id, c.type, c.direct_key, c.title, c.avatar_url, c.owner_id, c.last_message_id, c.last_message_at, cm.last_read_message_id,
 			(SELECT COUNT(*) FROM conversation_members cm2 WHERE cm2.conversation_id = c.id AND cm2.status = ?) AS member_count`, MemberStatusActive).
 		Joins("JOIN conversations c ON c.id = cm.conversation_id").
 		Where("cm.user_id = ? AND cm.status = ?", userID, MemberStatusActive).
@@ -278,13 +289,18 @@ func ListConversations(userID int64) ([]ConversationListItemDTO, error) {
 		return nil, fmt.Errorf("查询会话列表失败: %w", err)
 	}
 
+	lastMessages, err := loadConversationListLastMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	unreadCounts, err := loadConversationUnreadCounts(userID, rows)
+	if err != nil {
+		return nil, err
+	}
+
 	result := make([]ConversationListItemDTO, 0, len(rows))
 	for _, row := range rows {
-		item, err := row.ToDTO(userID)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
+		result = append(result, row.ToDTO(lastMessages[int64Value(row.LastMessageID)], unreadCounts[row.ID]))
 	}
 	return result, nil
 }
@@ -551,7 +567,9 @@ func UpdateGroupProfile(operatorID int64, conversationID int64, title string, av
 	// 群名称是展示和搜索的重要字段，不允许空白字符串。
 	title = strings.TrimSpace(title)
 	avatarURL = strings.TrimSpace(avatarURL)
-	if title == "" {
+	if title == "" ||
+		utf8.RuneCountInString(title) > maxGroupTitleRunes ||
+		utf8.RuneCountInString(avatarURL) > maxGroupAvatarURLRunes {
 		return ConversationDTO{}, ErrValidation
 	}
 
@@ -645,6 +663,7 @@ func (m ConversationMember) ToDTO() ConversationMemberDTO {
 type conversationListRow struct {
 	ID                int64
 	Type              string
+	DirectKey         *string
 	Title             *string
 	AvatarURL         *string
 	OwnerID           *int64
@@ -654,11 +673,12 @@ type conversationListRow struct {
 	MemberCount       int64
 }
 
-// ToDTO 把列表查询行转换成稳定的响应结构。
-func (r conversationListRow) ToDTO(userID int64) (ConversationListItemDTO, error) {
+// ToDTO 只负责纯数据转换；批量查询在 ListConversations 中完成，避免转换方法隐藏数据库访问。
+func (r conversationListRow) ToDTO(lastMessage *MessageDTO, unreadCount int64) ConversationListItemDTO {
 	item := ConversationListItemDTO{
 		ID:                r.ID,
 		Type:              r.Type,
+		DirectKey:         stringValue(r.DirectKey),
 		Title:             stringValue(r.Title),
 		AvatarURL:         stringValue(r.AvatarURL),
 		OwnerID:           int64Value(r.OwnerID),
@@ -666,21 +686,11 @@ func (r conversationListRow) ToDTO(userID int64) (ConversationListItemDTO, error
 		LastMessageID:     int64Value(r.LastMessageID),
 		LastMessageAt:     timeString(r.LastMessageAt),
 		LastReadMessageID: int64Value(r.LastReadMessageID),
+		LastMessage:       lastMessage,
+		UnreadCount:       unreadCount,
 	}
-
-	lastMessage, err := findOptionalLastMessage(r.LastMessageID)
-	if err != nil {
-		return ConversationListItemDTO{}, err
-	}
-	item.LastMessage = lastMessage
-
-	unreadCount, err := countUnreadMessages(userID, r.ID)
-	if err != nil {
-		return ConversationListItemDTO{}, err
-	}
-	item.UnreadCount = unreadCount
 	item.UnreadRevision = unreadRevision(item.LastMessageID, item.LastReadMessageID)
-	return item, nil
+	return item
 }
 
 // GetConversationUnreadState 返回某个用户在会话中的权威未读状态。
@@ -740,19 +750,67 @@ func findDirectConversationByKey(directKey string) (Conversation, error) {
 	return conversation, nil
 }
 
-func findOptionalLastMessage(lastMessageID *int64) (*MessageDTO, error) {
-	if lastMessageID == nil || *lastMessageID <= 0 {
-		return nil, nil
+// loadConversationListLastMessages 一次性补齐列表中的最后消息，避免每个会话单独查一次 messages。
+func loadConversationListLastMessages(rows []conversationListRow) (map[int64]*MessageDTO, error) {
+	messageIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if messageID := int64Value(row.LastMessageID); messageID > 0 {
+			messageIDs = append(messageIDs, messageID)
+		}
 	}
-	message, err := FindMessageByID(*lastMessageID)
-	if errors.Is(err, ErrMessageNotFound) {
-		return nil, nil
+
+	result := make(map[int64]*MessageDTO, len(messageIDs))
+	if len(messageIDs) == 0 {
+		return result, nil
 	}
+
+	var messages []Message
+	if err := DB.Where("id IN ?", messageIDs).Find(&messages).Error; err != nil {
+		return nil, fmt.Errorf("批量查询会话最后消息失败: %w", err)
+	}
+	for _, message := range messages {
+		dto := message.ToDTO()
+		result[message.ID] = &dto
+	}
+	return result, nil
+}
+
+type conversationUnreadCountRow struct {
+	ConversationID int64
+	UnreadCount    int64
+}
+
+// loadConversationUnreadCounts 用一次 GROUP BY 计算列表内全部未读数。
+// 已读游标仍来自当前用户的 active 成员记录，计算口径与单会话未读接口一致。
+func loadConversationUnreadCounts(userID int64, rows []conversationListRow) (map[int64]int64, error) {
+	conversationIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		conversationIDs = append(conversationIDs, row.ID)
+	}
+
+	result := make(map[int64]int64, len(conversationIDs))
+	if len(conversationIDs) == 0 {
+		return result, nil
+	}
+
+	var unreadRows []conversationUnreadCountRow
+	err := DB.Table("messages AS m").
+		Select("m.conversation_id, COUNT(*) AS unread_count").
+		Joins("JOIN conversation_members cm ON cm.conversation_id = m.conversation_id").
+		Where("m.conversation_id IN ?", conversationIDs).
+		Where("cm.user_id = ? AND cm.status = ?", userID, MemberStatusActive).
+		Where("m.sender_id <> ?", userID).
+		Where("m.id > COALESCE(cm.last_read_message_id, 0)").
+		Where("m.status = ?", MessageStatusNormal).
+		Group("m.conversation_id").
+		Scan(&unreadRows).Error
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("批量计算会话未读数失败: %w", err)
 	}
-	dto := message.ToDTO()
-	return &dto, nil
+	for _, unreadRow := range unreadRows {
+		result[unreadRow.ConversationID] = unreadRow.UnreadCount
+	}
+	return result, nil
 }
 
 // countUnreadMessages 根据成员的 last_read_message_id 计算未读数。
@@ -909,7 +967,9 @@ func ensureUsersExist(userIDs []int64) error {
 		}
 	}
 	var count int64
-	if err := DB.Model(&User{}).Where("id IN ?", userIDs).Count(&count).Error; err != nil {
+	if err := DB.Model(&User{}).
+		Where("id IN ? AND status = ?", userIDs, UserStatusEnabled).
+		Count(&count).Error; err != nil {
 		return fmt.Errorf("查询用户失败: %w", err)
 	}
 	if count != int64(len(userIDs)) {

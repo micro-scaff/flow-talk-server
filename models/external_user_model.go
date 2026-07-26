@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -46,22 +47,37 @@ func SyncExternalUser(profile ExternalUserProfile) (User, error) {
 	if profile.Nickname == "" {
 		profile.Nickname = profile.Username
 	}
+	// 在写库前按表结构校验长度，避免超长外部资料变成不透明的数据库 500。
+	if utf8.RuneCountInString(profile.ExternalID) > 128 ||
+		utf8.RuneCountInString(profile.Username) > maxUsernameRunes ||
+		utf8.RuneCountInString(profile.Nickname) > maxNicknameRunes {
+		return User{}, ErrValidation
+	}
 
-	// 已存在的外部用户只刷新展示资料和状态，不改变内部 ID。
+	// 已存在的外部用户只刷新展示资料，不改变内部 ID 或内部启用状态。
 	// 内部 user_id 是会话、消息、设备等所有 IM 数据的稳定关联键。
 	existing, err := FindUserByExternalID(profile.ExternalID)
 	if err == nil {
-		updates := map[string]any{
-			"nickname":   profile.Nickname,
-			"avatar_url": optionalString(profile.AvatarURL),
-			"status":     UserStatusEnabled,
+		updates := make(map[string]any, 2)
+		if existing.Nickname != profile.Nickname {
+			updates["nickname"] = profile.Nickname
 		}
-		if err := DB.Model(&existing).Updates(updates).Error; err != nil {
-			return User{}, fmt.Errorf("同步外部用户失败: %w", err)
+		existingAvatarURL := ""
+		if existing.AvatarURL != nil {
+			existingAvatarURL = *existing.AvatarURL
+		}
+		if existingAvatarURL != profile.AvatarURL {
+			updates["avatar_url"] = optionalString(profile.AvatarURL)
+		}
+
+		// 外部资料没有变化时跳过 UPDATE，避免每次换取 JWT 都产生无意义数据库写入。
+		if len(updates) > 0 {
+			if err := DB.Model(&existing).Updates(updates).Error; err != nil {
+				return User{}, fmt.Errorf("同步外部用户失败: %w", err)
+			}
 		}
 		existing.Nickname = profile.Nickname
 		existing.AvatarURL = optionalString(profile.AvatarURL)
-		existing.Status = UserStatusEnabled
 		return existing, nil
 	}
 	if !errors.Is(err, ErrUserNotFound) {

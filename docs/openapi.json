@@ -2143,6 +2143,10 @@
             "type": "string",
             "example": "direct"
           },
+          "direct_key": {
+            "type": "string",
+            "example": "1:2"
+          },
           "title": {
             "type": "string",
             "example": ""

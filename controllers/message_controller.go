@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"flow-talk/models"
@@ -66,8 +67,9 @@ func (ctl MessageController) Create(c *gin.Context) {
 			return
 		}
 		if err := publishCreatedMessageUpdates(ctl.Bus, ctl.Hub, memberIDs, message); err != nil {
-			writeMessageError(c, err)
-			return
+			// 消息已经在事务中持久化，实时广播属于可恢复的增量通知。
+			// 这里仍返回成功，客户端会通过历史消息/会话快照校准，避免重试时得到误导性的 500。
+			log.Printf("消息已保存但实时状态发布失败: message_id=%d err=%v", message.ID, err)
 		}
 	}
 
@@ -117,8 +119,8 @@ func (ctl MessageController) MarkRead(c *gin.Context) {
 		UserID: user.ID,
 		State:  state,
 	}); err != nil {
-		writeMessageError(c, err)
-		return
+		// 已读游标已经提交到 MySQL；广播失败不能把已成功的写操作伪装成 HTTP 失败。
+		log.Printf("已读状态已保存但实时发布失败: user_id=%d conversation_id=%d err=%v", user.ID, req.ConversationID, err)
 	}
 	responses.Success(c, state, "标记已读成功")
 }

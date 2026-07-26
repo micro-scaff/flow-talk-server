@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -27,6 +28,7 @@ const (
 const (
 	defaultMessagePageLimit = 20
 	maxMessagePageLimit     = 100
+	maxClientMsgIDRunes     = 64
 )
 
 var (
@@ -103,7 +105,8 @@ func SendMessage(senderID int64, conversationID int64, clientMsgID string, messa
 func SendMessageWithResult(senderID int64, conversationID int64, clientMsgID string, messageType string, content json.RawMessage) (SendMessageResult, error) {
 	clientMsgID = strings.TrimSpace(clientMsgID)
 	messageType = strings.TrimSpace(messageType)
-	if senderID <= 0 || conversationID <= 0 || clientMsgID == "" {
+	if senderID <= 0 || conversationID <= 0 || clientMsgID == "" ||
+		utf8.RuneCountInString(clientMsgID) > maxClientMsgIDRunes {
 		return SendMessageResult{}, ErrValidation
 	}
 	if err := validateMessageContent(messageType, content); err != nil {
@@ -165,7 +168,11 @@ func SendMessageWithResult(senderID int64, conversationID int64, clientMsgID str
 			"last_message_id": message.ID,
 			"last_message_at": message.SentAt,
 		}
-		if err := tx.Model(&Conversation{}).Where("id = ?", conversationID).Updates(updates).Error; err != nil {
+		// 并发发送时，较小 ID 的事务可能更晚提交。只允许更大的消息 ID 推进摘要，
+		// 防止旧事务把 conversations.last_message_id 回退到更早的消息。
+		if err := tx.Model(&Conversation{}).
+			Where("id = ? AND (last_message_id IS NULL OR last_message_id < ?)", conversationID, message.ID).
+			Updates(updates).Error; err != nil {
 			return err
 		}
 		saved = message

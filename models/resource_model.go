@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -53,11 +54,20 @@ func SaveUploadedResource(userID int64, resourceType string, header *multipart.F
 	}
 
 	ext := strings.ToLower(filepath.Ext(header.Filename))
-	// 只信任文件扩展名做当前阶段的轻量校验。
-	// 如果后续面向公网，应再加入 MIME 嗅探、病毒扫描和对象存储直传。
+	// 扩展名先用于选择白名单，随后还会校验文件头；生产环境仍应增加病毒扫描和内容审核。
 	dirName, err := resourceDirAndValidateExt(resourceType, ext)
 	if err != nil {
 		return ResourceDTO{}, err
+	}
+	// 扩展名由客户端提供，不能单独作为文件类型依据；读取文件头校验常见格式魔数。
+	headerBytes := make([]byte, 512)
+	n, readErr := io.ReadFull(src, headerBytes)
+	if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return ResourceDTO{}, ErrInvalidResourceFile
+	}
+	headerBytes = headerBytes[:n]
+	if !matchesResourceSignature(ext, headerBytes) {
+		return ResourceDTO{}, ErrInvalidResourceFile
 	}
 
 	// 每个用户单独一个目录，避免不同用户上传同名文件互相覆盖，也方便后续做用户维度清理。
@@ -73,16 +83,46 @@ func SaveUploadedResource(userID int64, resourceType string, header *multipart.F
 	if err != nil {
 		return ResourceDTO{}, fmt.Errorf("创建资源文件失败: %w", err)
 	}
-	defer dst.Close()
+	saved := false
+	defer func() {
+		_ = dst.Close()
+		if !saved {
+			_ = os.Remove(dstPath)
+		}
+	}()
 
-	if _, err := io.Copy(dst, src); err != nil {
+	// 文件头已经被读取，使用 MultiReader 把它拼回完整文件再写入磁盘。
+	if _, err := io.Copy(dst, io.MultiReader(bytes.NewReader(headerBytes), src)); err != nil {
 		return ResourceDTO{}, fmt.Errorf("保存资源文件失败: %w", err)
 	}
+	if err := dst.Close(); err != nil {
+		return ResourceDTO{}, fmt.Errorf("关闭资源文件失败: %w", err)
+	}
+	saved = true
 
 	return ResourceDTO{
 		Type: resourceType,
 		URL:  "/api/" + filepath.ToSlash(dstPath),
 	}, nil
+}
+
+func matchesResourceSignature(ext string, data []byte) bool {
+	switch ext {
+	case ".jpg", ".jpeg":
+		return len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff
+	case ".png":
+		return len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a})
+	case ".gif":
+		return len(data) >= 6 && (bytes.Equal(data[:6], []byte("GIF87a")) || bytes.Equal(data[:6], []byte("GIF89a")))
+	case ".webp":
+		return len(data) >= 12 && bytes.Equal(data[:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP"))
+	case ".mp4", ".mov":
+		return len(data) >= 12 && bytes.Equal(data[4:8], []byte("ftyp"))
+	case ".webm":
+		return len(data) >= 4 && bytes.Equal(data[:4], []byte{0x1a, 0x45, 0xdf, 0xa3})
+	default:
+		return false
+	}
 }
 
 // NormalizeAvatarBase64 校验注册头像 base64。

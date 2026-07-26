@@ -3,10 +3,15 @@ package models
 import (
 	"errors"
 	"strings"
+	"unicode/utf8"
 )
 
-// ErrUnsupportedAuthProvider 表示客户端传入的 provider 当前没有对应校验器。
-var ErrUnsupportedAuthProvider = errors.New("不支持的外部身份提供方")
+const maxDemoAccessTokenRunes = 96
+
+var (
+	// ErrUnsupportedAuthProvider 表示客户端传入的 provider 当前没有对应校验器。
+	ErrUnsupportedAuthProvider = errors.New("不支持的外部身份提供方")
+)
 
 // ExternalUserProfile 是外部身份系统返回给 IM 服务的用户资料。
 // IM 只信任 external_id 作为稳定映射键，昵称和头像可以随外部系统变化同步更新。
@@ -37,7 +42,7 @@ func (DemoTokenVerifier) Verify(accessToken string) (ExternalUserProfile, error)
 	// demo provider 只用于本地开发联调，不访问真实第三方系统。
 	// 真实 provider 应在这里调用外部服务校验 access_token，并返回可信的 external_id。
 	accessToken = strings.TrimSpace(accessToken)
-	if accessToken == "" {
+	if accessToken == "" || utf8.RuneCountInString(accessToken) > maxDemoAccessTokenRunes {
 		return ExternalUserProfile{}, ErrValidation
 	}
 

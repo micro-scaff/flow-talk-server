@@ -132,7 +132,7 @@ func VerifyToken(token string, secret string) (jwtClaims, error) {
 	if err != nil || json.Unmarshal(payloadJSON, &payload) != nil {
 		return jwtClaims{}, ErrInvalidToken
 	}
-	if payload.Expires < time.Now().Unix() {
+	if payload.Expires <= time.Now().Unix() {
 		return jwtClaims{}, ErrTokenExpired
 	}
 
