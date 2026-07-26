@@ -20,6 +20,10 @@ const (
 	// ResourceTypeVideo 表示用户上传的是聊天视频资源。
 	ResourceTypeVideo = "video"
 
+	// MaxAvatarBytes 是头像解码后的最大字节数。Base64 文本会比原文件大约三分之一，
+	// 请求体上限需要在 middleware 中额外预留编码和 JSON 字段开销。
+	MaxAvatarBytes int64 = 10 << 20
+
 	// staticRootDir 是上传资源在服务端本地磁盘的根目录。
 	// main.go 会把 ./static 暴露为 /api/static，因此这里返回 URL 时会加上 /api 前缀。
 	staticRootDir = "static"
@@ -32,6 +36,8 @@ var (
 	ErrInvalidResourceFile = errors.New("无效资源文件")
 	// ErrInvalidAvatarBase64 表示注册头像不是合法 base64 字符串。
 	ErrInvalidAvatarBase64 = errors.New("无效头像 base64")
+	// ErrAvatarTooLarge 表示头像解码后的原始内容超过 10 MiB。
+	ErrAvatarTooLarge = errors.New("头像大小超过 10 MB")
 )
 
 // ResourceDTO 是资源上传成功后的返回结构。
@@ -143,10 +149,15 @@ func NormalizeAvatarBase64(value string) (string, error) {
 	if encoded == "" {
 		return "", ErrInvalidAvatarBase64
 	}
-	if _, err := base64.StdEncoding.DecodeString(encoded); err != nil {
-		if _, rawErr := base64.RawStdEncoding.DecodeString(encoded); rawErr != nil {
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(encoded)
+		if err != nil {
 			return "", ErrInvalidAvatarBase64
 		}
+	}
+	if int64(len(decoded)) > MaxAvatarBytes {
+		return "", ErrAvatarTooLarge
 	}
 	return value, nil
 }

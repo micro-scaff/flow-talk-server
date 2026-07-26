@@ -111,6 +111,9 @@
           "400": {
             "$ref": "#/components/responses/ValidationError"
           },
+          "413": {
+            "$ref": "#/components/responses/AvatarTooLarge"
+          },
           "409": {
             "$ref": "#/components/responses/UsernameTaken"
           },
@@ -1818,6 +1821,21 @@
           }
         }
       },
+      "AvatarTooLarge": {
+        "description": "头像大小超过 10 MiB，或注册请求体过大",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorApiResponse"
+            },
+            "example": {
+              "code": 413,
+              "data": null,
+              "message": "头像大小不能超过 10 MB"
+            }
+          }
+        }
+      },
       "Forbidden": {
         "description": "无权访问目标资源",
         "content": {
@@ -1889,7 +1907,7 @@
           },
           "avatar_base64": {
             "type": "string",
-            "description": "头像 base64 字符串，可传 data URL 或纯 base64",
+            "description": "头像 base64 字符串，可传 data URL 或纯 base64；解码后的图片大小不能超过 10 MiB",
             "example": "data:image/png;base64,iVBORw0KGgo="
           }
         }

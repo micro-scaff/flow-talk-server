@@ -107,6 +107,8 @@ func writeModelError(c *gin.Context, err error) {
 		responses.Error(c, http.StatusBadRequest, "参数校验失败")
 	case errors.Is(err, models.ErrInvalidAvatarBase64):
 		responses.Error(c, http.StatusBadRequest, "头像 base64 不合法")
+	case errors.Is(err, models.ErrAvatarTooLarge):
+		responses.Error(c, http.StatusRequestEntityTooLarge, "头像大小不能超过 10 MB")
 	case errors.Is(err, models.ErrInvalidCredentials):
 		responses.Error(c, http.StatusUnauthorized, "账号或密码错误")
 	case errors.Is(err, models.ErrUserDisabled):

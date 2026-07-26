@@ -130,7 +130,7 @@ HTTP / WebSocket
 - JWT 使用 HS256，只包含用户 ID、用户名、签发时间和过期时间。
 - 当前没有 refresh token、主动登出或 token 黑名单；token 失效后需要重新登录。
 - 本地用户密码使用 bcrypt 哈希保存在 `users.password`；旧数据库中的明文密码会在首次成功登录后自动原地升级。
-- 普通 API 请求体统一限制为 5 MiB，WebSocket 单事件限制为 64 KiB，multipart 资源上传使用独立的 100 MiB 上限。
+- 普通 API 请求体统一限制为 5 MiB；注册接口为容纳最大 10 MiB 的 Base64 头像，单独使用 14 MiB 请求体上限；WebSocket 单事件限制为 64 KiB，multipart 资源上传使用独立的 100 MiB 上限。
 - 内置 `demo` 外部登录只校验 access token 非空，不代表真实第三方认证。
 - 外部用户再次登录时只同步昵称和头像，不覆盖内部禁用状态；已禁用用户不能换取新的 IM JWT。
 

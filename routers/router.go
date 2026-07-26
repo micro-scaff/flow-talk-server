@@ -74,7 +74,12 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	// /api 放面向客户端的通用接口。
 	api := engine.Group("/api")
 	// 普通 API 请求体统一限制为 5 MiB；multipart 资源上传有自己的独立上限，不受这里影响。
-	api.Use(middlewares.LimitAPIRequestBody(middlewares.DefaultMaxAPIRequestBodyBytes))
+	api.Use(middlewares.LimitAPIRequestBodyWithPathLimits(
+		middlewares.DefaultMaxAPIRequestBodyBytes,
+		map[string]int64{
+			"/api/auth/register": middlewares.MaxRegisterRequestBodyBytes,
+		},
+	))
 	{
 		api.GET("/ws", wsController.Connect)
 
