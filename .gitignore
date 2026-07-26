@@ -42,3 +42,5 @@ tmp/**
 flow-talk-server
 
 /dist/
+.tmp-go-cache/
+static/*
