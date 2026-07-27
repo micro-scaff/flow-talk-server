@@ -248,6 +248,14 @@ func DeliverConversationUnreadChangedToLocalHub(hub *models.WSHub, event models.
 	hub.BroadcastEventToUsers([]int64{event.UserID}, models.NewWSEvent(models.WSEventConversationUnreadChanged, "", event.State))
 }
 
+// DeliverConversationChangedToLocalHub 通知受影响用户重新拉取会话列表和详情。
+func DeliverConversationChangedToLocalHub(hub *models.WSHub, event models.ConversationChangedEvent) {
+	if hub == nil {
+		return
+	}
+	hub.BroadcastEventToUsers(event.UserIDs, models.NewWSEvent(models.WSEventConversationChanged, "", event.Change))
+}
+
 func publishMessageDeliver(bus models.RealtimeBus, hub *models.WSHub, event models.MessageDeliverEvent) error {
 	// bus 为空时直接走本机 Hub，方便单元测试和最小化单进程部署。
 	// 正常启动时路由层会注入 MemoryRealtimeBus 或 RedisRealtimeBus。
@@ -272,6 +280,14 @@ func publishConversationUnreadChanged(bus models.RealtimeBus, hub *models.WSHub,
 		return nil
 	}
 	return bus.PublishConversationUnreadChanged(event)
+}
+
+func publishConversationChanged(bus models.RealtimeBus, hub *models.WSHub, event models.ConversationChangedEvent) error {
+	if bus == nil {
+		DeliverConversationChangedToLocalHub(hub, event)
+		return nil
+	}
+	return bus.PublishConversationChanged(event)
 }
 
 // publishCreatedMessageUpdates 先投递消息，再给每个接收者发送其权威未读状态。

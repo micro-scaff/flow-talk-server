@@ -27,7 +27,13 @@ type ConversationUnreadChangedEvent struct {
 	State  ConversationUnreadStateDTO `json:"state"`
 }
 
-// RealtimeBus 抽象消息投递、在线状态和会话未读状态三类实时事件。
+// ConversationChangedEvent 把会话变化定向投递给受影响用户。
+type ConversationChangedEvent struct {
+	UserIDs []int64                    `json:"user_ids"`
+	Change  ConversationChangedPayload `json:"change"`
+}
+
+// RealtimeBus 抽象消息投递、在线状态、会话未读和会话变化四类实时事件。
 // 单实例使用内存实现，多实例使用 Redis Pub/Sub，业务入口只依赖这组稳定接口。
 type RealtimeBus interface {
 	PublishMessageDeliver(event MessageDeliverEvent) error
@@ -36,14 +42,17 @@ type RealtimeBus interface {
 	SubscribePresenceChanged(handler func(PresenceChangedEvent)) error
 	PublishConversationUnreadChanged(event ConversationUnreadChangedEvent) error
 	SubscribeConversationUnreadChanged(handler func(ConversationUnreadChangedEvent)) error
+	PublishConversationChanged(event ConversationChangedEvent) error
+	SubscribeConversationChanged(handler func(ConversationChangedEvent)) error
 }
 
 // MemoryRealtimeBus 是单进程内存实现，主要用于开发和当前 v7 落地占位。
 type MemoryRealtimeBus struct {
-	mu                         sync.RWMutex
-	messageHandlers            []func(MessageDeliverEvent)
-	presenceHandlers           []func(PresenceChangedEvent)
-	conversationUnreadHandlers []func(ConversationUnreadChangedEvent)
+	mu                          sync.RWMutex
+	messageHandlers             []func(MessageDeliverEvent)
+	presenceHandlers            []func(PresenceChangedEvent)
+	conversationUnreadHandlers  []func(ConversationUnreadChangedEvent)
+	conversationChangedHandlers []func(ConversationChangedEvent)
 }
 
 // NewMemoryRealtimeBus 创建单进程内存事件总线。
@@ -120,6 +129,26 @@ func (b *MemoryRealtimeBus) SubscribeConversationUnreadChanged(handler func(Conv
 	return nil
 }
 
+func (b *MemoryRealtimeBus) PublishConversationChanged(event ConversationChangedEvent) error {
+	b.mu.RLock()
+	handlers := append([]func(ConversationChangedEvent){}, b.conversationChangedHandlers...)
+	b.mu.RUnlock()
+	for _, handler := range handlers {
+		handler(event)
+	}
+	return nil
+}
+
+func (b *MemoryRealtimeBus) SubscribeConversationChanged(handler func(ConversationChangedEvent)) error {
+	if handler == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.conversationChangedHandlers = append(b.conversationChangedHandlers, handler)
+	return nil
+}
+
 // RedisRealtimeBus 使用 Redis Pub/Sub 分发跨节点实时投递事件。
 // 每个实例都订阅同一个 channel，收到事件后只投递自己本机 Hub 中存在的连接。
 type RedisRealtimeBus struct {
@@ -159,6 +188,10 @@ func (b *RedisRealtimeBus) PublishPresenceChanged(event PresenceChangedEvent) er
 
 func (b *RedisRealtimeBus) PublishConversationUnreadChanged(event ConversationUnreadChangedEvent) error {
 	return b.publish(b.conversationUnreadChannel(), event)
+}
+
+func (b *RedisRealtimeBus) PublishConversationChanged(event ConversationChangedEvent) error {
+	return b.publish(b.conversationChangedChannel(), event)
 }
 
 // SubscribeMessageDeliver 订阅 Redis 实时投递频道。
@@ -221,6 +254,20 @@ func (b *RedisRealtimeBus) SubscribeConversationUnreadChanged(handler func(Conve
 	})
 }
 
+func (b *RedisRealtimeBus) SubscribeConversationChanged(handler func(ConversationChangedEvent)) error {
+	if handler == nil {
+		return nil
+	}
+	return b.subscribe(b.conversationChangedChannel(), func(payload []byte) {
+		var event ConversationChangedEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			log.Printf("解析 Redis 会话变化事件失败: %v", err)
+			return
+		}
+		handler(event)
+	})
+}
+
 func (b *RedisRealtimeBus) publish(channel string, event any) error {
 	if b == nil || b.client == nil {
 		return nil
@@ -260,4 +307,8 @@ func (b *RedisRealtimeBus) presenceChannel() string {
 
 func (b *RedisRealtimeBus) conversationUnreadChannel() string {
 	return b.channel + ":conversation_unread"
+}
+
+func (b *RedisRealtimeBus) conversationChangedChannel() string {
+	return b.channel + ":conversation_changed"
 }

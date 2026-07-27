@@ -37,7 +37,7 @@
 - WebSocket `message.send` 复用 v3 消息写入逻辑
 - `message.ack` 确认入库
 - `message.deliver` 向会话全部 active 成员的在线连接投递
-- `presence.changed` 和 `conversation.unread.changed` 增量同步在线、未读状态
+- `presence.changed`、`conversation.unread.changed` 和 `conversation.changed` 增量同步在线、未读及会话变化
 - 可选 Redis Pub/Sub 跨实例广播实时事件
 
 ### v5：设备与离线
@@ -186,12 +186,12 @@ WebSocket 连接由单进程 `WSHub` 管理。一个用户可以同时有多条�
 - 同一用户多连接：发送方自己的其它连接也会收到 `message.deliver`，用于多端同步
 - 慢连接：每条连接的发送队列长度为 32，队列满时放弃本次实时投递
 - 离线成员：不实时投递，依靠历史消息、会话列表和未读数补齐
-- 多实例：启用 Redis 后通过 `RealtimeBus` 发布 `message.deliver`、`presence.changed` 和 `conversation.unread.changed`，每个节点订阅后只投递自己的本机连接
+- 多实例：启用 Redis 后通过 `RealtimeBus` 发布 `message.deliver`、`presence.changed`、`conversation.unread.changed` 和 `conversation.changed`，每个节点订阅后只投递自己的本机连接
 
 Redis 用于跨节点协同，但不替代本机 WebSocket 连接管理：
 
 - 本机 `WSHub`：继续保存真实 WebSocket 连接、发送队列和连接生命周期
-- Redis Pub/Sub：广播 `message.deliver`、`presence.changed`、`conversation.unread.changed` 等跨节点实时事件
+- Redis Pub/Sub：广播 `message.deliver`、`presence.changed`、`conversation.unread.changed`、`conversation.changed` 等跨节点实时事件
 - Redis TTL key 或 ZSET：记录用户在线连接快照，支撑全局在线状态查询
 - `redis.channel` 是消息投递基础频道；在线状态和未读状态分别使用派生频道 `redis.channel + ":presence"`、`redis.channel + ":conversation_unread"`
 - MySQL：继续保存消息、会话、成员、回执等最终业务状态
@@ -717,7 +717,7 @@ GET /api/ws?token={jwt}&device_id={device_id}
 - 多实例部署时建议启用 Redis；如果需要可重放投递或更强消费确认，可继续演进到 Redis Streams、MQ 或独立 WebSocket 网关。
 - 当前未读数基于已读游标计算，数据量变大后可以再做缓存或冗余计数。
 - WebSocket 连接 75 秒没有收到应用事件会被服务端回收；客户端应每 25 到 30 秒发送一次 `ping`。
-- `presence.changed` 和 `conversation.unread.changed` 是增量通知；登录初始化、重连和页面重新可见时仍应使用 HTTP 快照校准。
+- `presence.changed`、`conversation.unread.changed` 和 `conversation.changed` 是增量通知；登录初始化、重连和页面重新可见时仍应使用 HTTP 快照校准。
 - 本地密码已经使用 bcrypt 哈希；生产环境还应增加登录限流、弱密码策略和凭证泄露监测。
 
 ## 当前实现边界

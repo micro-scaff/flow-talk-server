@@ -481,7 +481,7 @@
           "WebSocket"
         ],
         "summary": "建立 WebSocket 连接",
-        "description": "地址格式：GET /api/ws?token={jwt}&device_id={device_id}。事件格式统一为 {type, request_id, payload}，支持 ping、message.send、message.ack、message.deliver、presence.changed、conversation.unread.changed、error。客户端每 25-30 秒发送 ping，服务端 75 秒没有收到事件会回收连接。聊天页面发送消息应优先使用 message.send，不要同时调用 HTTP 发送接口。收到 conversation.unread.changed 后必须用服务端 unread_count 替换本地数量，不要自行 +1/-1。登录初始化和 WebSocket 重连后应重新获取会话与 presence HTTP 快照。",
+        "description": "地址格式：GET /api/ws?token={jwt}&device_id={device_id}。事件格式统一为 {type, request_id, payload}，支持 ping、message.send、message.ack、message.deliver、presence.changed、conversation.unread.changed、conversation.changed、error。客户端每 25-30 秒发送 ping，服务端 75 秒没有收到事件会回收连接。聊天页面发送消息应优先使用 message.send，不要同时调用 HTTP 发送接口。收到 conversation.unread.changed 后必须用服务端 unread_count 替换本地数量，不要自行 +1/-1；收到 conversation.changed 后重新获取会话列表，并在目标会话已打开时重新获取详情。登录初始化和 WebSocket 重连后应重新获取会话与 presence HTTP 快照。",
         "parameters": [
           {
             "name": "token",

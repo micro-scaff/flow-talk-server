@@ -12,7 +12,10 @@ import (
 )
 
 // ConversationController 处理会话相关接口。
-type ConversationController struct{}
+type ConversationController struct {
+	Hub *models.WSHub
+	Bus models.RealtimeBus
+}
 
 // ConversationIDRequest 是只需要会话 ID 的通用请求体。
 type ConversationIDRequest struct {
@@ -107,6 +110,8 @@ func (ctl ConversationController) CreateGroup(c *gin.Context) {
 		writeConversationError(c, err)
 		return
 	}
+	GroupController{Hub: ctl.Hub, Bus: ctl.Bus}.
+		publishConversationChanged(conversation.ID, models.ConversationChangeMembers)
 	responses.Success(c, conversation, "创建群聊成功")
 }
 

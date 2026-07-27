@@ -33,6 +33,7 @@ const (
 
 	maxGroupTitleRunes     = 128
 	maxGroupAvatarURLRunes = 255
+	maxGroupMemberAttempts = 3
 )
 
 var (
@@ -59,6 +60,8 @@ var (
 
 	// errDirectConversationRace 是内部哨兵错误，用来处理并发创建同一个单聊时的唯一键冲突。
 	errDirectConversationRace = errors.New("单聊会话已被并发创建")
+	// errGroupMemberRace 触发整笔群成员事务重试，避免并发邀请同一用户时返回唯一键冲突。
+	errGroupMemberRace = errors.New("群成员已被并发添加")
 )
 
 // Conversation 映射 conversations 表，统一承载单聊和群聊。
@@ -140,13 +143,14 @@ type ConversationUnreadStateDTO struct {
 
 // ConversationDetailDTO 包含群权限判断所需的完整成员角色和状态。
 type ConversationDetailDTO struct {
-	ID        int64                   `json:"id"`
-	Type      string                  `json:"type"`
-	DirectKey string                  `json:"direct_key,omitempty"`
-	Title     string                  `json:"title"`
-	AvatarURL string                  `json:"avatar_url"`
-	OwnerID   int64                   `json:"owner_id"`
-	Members   []ConversationMemberDTO `json:"members"`
+	ID          int64                   `json:"id"`
+	Type        string                  `json:"type"`
+	DirectKey   string                  `json:"direct_key,omitempty"`
+	Title       string                  `json:"title"`
+	AvatarURL   string                  `json:"avatar_url"`
+	OwnerID     int64                   `json:"owner_id"`
+	MemberCount int64                   `json:"member_count"`
+	Members     []ConversationMemberDTO `json:"members"`
 }
 
 // ConversationMemberDTO 只公开业务权限需要的成员字段，不暴露表记录主键。
@@ -399,62 +403,72 @@ func AddGroupMembers(operatorID int64, conversationID int64, userIDs []int64) ([
 	}
 
 	var result []ConversationMemberDTO
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		// 群管理只支持 group 会话，不能把单聊当作可维护成员列表的群。
-		if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
-			return err
-		}
-		operator, err := ensureActiveMemberWithConversationDB(tx, operatorID, conversationID)
-		if err != nil {
-			return err
-		}
-		if operator.Role != MemberRoleOwner && operator.Role != MemberRoleAdmin {
-			return ErrPermissionDenied
-		}
-
-		members := make([]ConversationMember, 0, len(userIDs))
-		for _, userID := range userIDs {
-			// 已经存在成员记录时复用旧记录。
-			// 这样 left/removed 成员可以重新激活，同时保留同一个唯一键记录。
-			member, err := findMemberWithDB(tx, conversationID, userID)
-			if errors.Is(err, ErrInvalidMember) {
-				member = ConversationMember{
-					ConversationID: conversationID,
-					UserID:         userID,
-					Role:           MemberRoleMember,
-					JoinedAt:       time.Now(),
-					Status:         MemberStatusActive,
-				}
-				if err := tx.Create(&member).Error; err != nil {
-					return err
-				}
-				members = append(members, member)
-				continue
+	var err error
+	for attempt := 0; attempt < maxGroupMemberAttempts; attempt++ {
+		result = nil
+		err = DB.Transaction(func(tx *gorm.DB) error {
+			// 群管理只支持 group 会话，不能把单聊当作可维护成员列表的群。
+			if _, err := ensureGroupConversationWithDB(tx, conversationID); err != nil {
+				return err
 			}
+			operator, err := ensureActiveMemberWithConversationDB(tx, operatorID, conversationID)
 			if err != nil {
 				return err
 			}
-			if member.Status != MemberStatusActive {
-				// 重新加入时恢复为普通成员，避免被移除前的管理员角色意外保留。
-				if err := tx.Model(&member).Updates(map[string]any{
-					"role":      MemberRoleMember,
-					"status":    MemberStatusActive,
-					"joined_at": time.Now(),
-				}).Error; err != nil {
+			if operator.Role != MemberRoleOwner && operator.Role != MemberRoleAdmin {
+				return ErrPermissionDenied
+			}
+
+			members := make([]ConversationMember, 0, len(userIDs))
+			for _, userID := range userIDs {
+				// 已经存在成员记录时复用旧记录。
+				// 这样 left/removed 成员可以重新激活，同时保留同一个唯一键记录。
+				member, err := findMemberWithDB(tx, conversationID, userID)
+				if errors.Is(err, ErrInvalidMember) {
+					member = ConversationMember{
+						ConversationID: conversationID,
+						UserID:         userID,
+						Role:           MemberRoleMember,
+						JoinedAt:       time.Now(),
+						Status:         MemberStatusActive,
+					}
+					if err := tx.Create(&member).Error; err != nil {
+						if isDuplicateKey(err) {
+							return errGroupMemberRace
+						}
+						return err
+					}
+					members = append(members, member)
+					continue
+				}
+				if err != nil {
 					return err
 				}
-				member.Role = MemberRoleMember
-				member.Status = MemberStatusActive
+				if member.Status != MemberStatusActive {
+					// 重新加入时恢复为普通成员，避免被移除前的管理员角色意外保留。
+					if err := tx.Model(&member).Updates(map[string]any{
+						"role":      MemberRoleMember,
+						"status":    MemberStatusActive,
+						"joined_at": time.Now(),
+					}).Error; err != nil {
+						return err
+					}
+					member.Role = MemberRoleMember
+					member.Status = MemberStatusActive
+				}
+				members = append(members, member)
 			}
-			members = append(members, member)
-		}
 
-		result = make([]ConversationMemberDTO, 0, len(members))
-		for _, member := range members {
-			result = append(result, member.ToDTO())
+			result = make([]ConversationMemberDTO, 0, len(members))
+			for _, member := range members {
+				result = append(result, member.ToDTO())
+			}
+			return nil
+		})
+		if !errors.Is(err, errGroupMemberRace) {
+			break
 		}
-		return nil
-	})
+	}
 	if err != nil {
 		return nil, fmt.Errorf("添加群成员失败: %w", err)
 	}
@@ -563,17 +577,17 @@ func UpdateMemberRole(operatorID int64, conversationID int64, targetUserID int64
 
 // UpdateGroupProfile 修改群名称和头像。
 // 只有群主和管理员可以修改，普通成员只能读取群资料。
-func UpdateGroupProfile(operatorID int64, conversationID int64, title string, avatarURL string) (ConversationDTO, error) {
+func UpdateGroupProfile(operatorID int64, conversationID int64, title string, avatarURL string) (ConversationDetailDTO, error) {
 	// 群名称是展示和搜索的重要字段，不允许空白字符串。
 	title = strings.TrimSpace(title)
 	avatarURL = strings.TrimSpace(avatarURL)
 	if title == "" ||
 		utf8.RuneCountInString(title) > maxGroupTitleRunes ||
 		utf8.RuneCountInString(avatarURL) > maxGroupAvatarURLRunes {
-		return ConversationDTO{}, ErrValidation
+		return ConversationDetailDTO{}, ErrValidation
 	}
 
-	var conversation Conversation
+	var detail ConversationDetailDTO
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		found, err := ensureGroupConversationWithDB(tx, conversationID)
 		if err != nil {
@@ -595,13 +609,17 @@ func UpdateGroupProfile(operatorID int64, conversationID int64, title string, av
 		}
 		found.Title = optionalString(title)
 		found.AvatarURL = optionalString(avatarURL)
-		conversation = found
+		var members []ConversationMember
+		if err := tx.Where("conversation_id = ?", conversationID).Order("id asc").Find(&members).Error; err != nil {
+			return err
+		}
+		detail = found.ToDetailDTO(members)
 		return nil
 	})
 	if err != nil {
-		return ConversationDTO{}, fmt.Errorf("修改群资料失败: %w", err)
+		return ConversationDetailDTO{}, fmt.Errorf("修改群资料失败: %w", err)
 	}
-	return conversation.ToDTO(), nil
+	return detail, nil
 }
 
 // CanManageGroupMember 表达 v6 权限矩阵中“操作者能否管理目标成员”的规则。
@@ -645,6 +663,9 @@ func (c Conversation) ToDetailDTO(members []ConversationMember) ConversationDeta
 	}
 	for _, member := range members {
 		result.Members = append(result.Members, member.ToDTO())
+		if member.Status == MemberStatusActive {
+			result.MemberCount++
+		}
 	}
 	return result
 }

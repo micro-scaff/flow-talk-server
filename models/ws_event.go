@@ -21,8 +21,15 @@ const (
 	WSEventPresenceChanged = "presence.changed"
 	// WSEventConversationUnreadChanged 表示当前用户某个会话的权威未读状态发生变化。
 	WSEventConversationUnreadChanged = "conversation.unread.changed"
+	// WSEventConversationChanged 表示会话资料、成员或权限发生变化，客户端应刷新会话快照。
+	WSEventConversationChanged = "conversation.changed"
 	// WSEventError 表示某个 WebSocket 请求事件处理失败。
 	WSEventError = "error"
+
+	// ConversationChangeMembers 覆盖成员增删、退出及角色变化。
+	ConversationChangeMembers = "members"
+	// ConversationChangeProfile 表示群名称或头像变化。
+	ConversationChangeProfile = "profile"
 )
 
 // WSEvent 是客户端和服务端之间统一使用的 JSON 事件信封。
@@ -51,6 +58,13 @@ type WSPongPayload struct {
 // Message 面向客户端展示，内部错误细节不直接透出。
 type WSErrorPayload struct {
 	Message string `json:"message"`
+}
+
+// ConversationChangedPayload 告诉客户端需要重新拉取哪个会话以及变化类别。
+// 事件不携带局部快照，避免多实例或连续变更时客户端合并出过期状态。
+type ConversationChangedPayload struct {
+	ConversationID int64  `json:"conversation_id"`
+	ChangeType     string `json:"change_type"`
 }
 
 // NewWSEvent 负责把任意 payload 包装成统一事件。

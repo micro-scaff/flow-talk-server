@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"flow-talk/models"
@@ -12,7 +13,10 @@ import (
 
 // GroupController 处理群资料和群成员管理接口。
 // 所有群管理权限都下沉到 models/conversation_model.go，controller 只做参数解析和响应转换。
-type GroupController struct{}
+type GroupController struct {
+	Hub *models.WSHub
+	Bus models.RealtimeBus
+}
 
 // AddMembersRequest 是添加群成员请求。
 // user_ids 可以包含重复 ID，model 层会统一去重和校验用户是否存在。
@@ -64,6 +68,7 @@ func (ctl GroupController) AddMembers(c *gin.Context) {
 		writeGroupError(c, err)
 		return
 	}
+	ctl.publishConversationChanged(req.ConversationID, models.ConversationChangeMembers)
 	responses.Success(c, members, "添加群成员成功")
 }
 
@@ -86,6 +91,7 @@ func (ctl GroupController) RemoveMember(c *gin.Context) {
 		writeGroupError(c, err)
 		return
 	}
+	ctl.publishConversationChanged(req.ConversationID, models.ConversationChangeMembers, req.UserID)
 	responses.Success(c, nil, "移除群成员成功")
 }
 
@@ -109,6 +115,7 @@ func (ctl GroupController) Leave(c *gin.Context) {
 		writeGroupError(c, err)
 		return
 	}
+	ctl.publishConversationChanged(req.ConversationID, models.ConversationChangeMembers, user.ID)
 	responses.Success(c, nil, "退出群聊成功")
 }
 
@@ -132,6 +139,7 @@ func (ctl GroupController) UpdateMemberRole(c *gin.Context) {
 		writeGroupError(c, err)
 		return
 	}
+	ctl.publishConversationChanged(req.ConversationID, models.ConversationChangeMembers)
 	responses.Success(c, member, "更新成员角色成功")
 }
 
@@ -155,7 +163,39 @@ func (ctl GroupController) UpdateProfile(c *gin.Context) {
 		writeGroupError(c, err)
 		return
 	}
+	ctl.publishConversationChanged(req.ConversationID, models.ConversationChangeProfile)
 	responses.Success(c, conversation, "修改群资料成功")
+}
+
+// publishConversationChanged 在数据库事务提交后发送增量失效通知。
+// 实时通知失败不回滚已经成功的群管理操作，客户端仍可通过 HTTP 快照恢复。
+func (ctl GroupController) publishConversationChanged(conversationID int64, changeType string, extraUserIDs ...int64) {
+	userIDs, err := models.ListActiveConversationMemberIDs(conversationID)
+	if err != nil {
+		log.Printf("群聊已更新但读取通知成员失败: conversation_id=%d err=%v", conversationID, err)
+		return
+	}
+	seen := make(map[int64]struct{}, len(userIDs)+len(extraUserIDs))
+	recipients := make([]int64, 0, len(userIDs)+len(extraUserIDs))
+	for _, userID := range append(userIDs, extraUserIDs...) {
+		if userID <= 0 {
+			continue
+		}
+		if _, exists := seen[userID]; exists {
+			continue
+		}
+		seen[userID] = struct{}{}
+		recipients = append(recipients, userID)
+	}
+	if err := publishConversationChanged(ctl.Bus, ctl.Hub, models.ConversationChangedEvent{
+		UserIDs: recipients,
+		Change: models.ConversationChangedPayload{
+			ConversationID: conversationID,
+			ChangeType:     changeType,
+		},
+	}); err != nil {
+		log.Printf("群聊已更新但实时通知失败: conversation_id=%d err=%v", conversationID, err)
+	}
 }
 
 // writeGroupError 把群管理领域错误翻译成 HTTP 响应。

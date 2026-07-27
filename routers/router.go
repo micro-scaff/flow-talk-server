@@ -58,6 +58,11 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 	}); err != nil {
 		log.Printf("订阅会话未读事件失败: %v", err)
 	}
+	if err := realtimeBus.SubscribeConversationChanged(func(event models.ConversationChangedEvent) {
+		controllers.DeliverConversationChangedToLocalHub(wsHub, event)
+	}); err != nil {
+		log.Printf("订阅会话变化事件失败: %v", err)
+	}
 	wsController := controllers.WSController{
 		JWT:              cfg.JWT,
 		Hub:              wsHub,
@@ -66,6 +71,14 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		PresenceProvider: presenceProvider,
 	}
 	messageController = controllers.MessageController{
+		Hub: wsHub,
+		Bus: realtimeBus,
+	}
+	conversationController = controllers.ConversationController{
+		Hub: wsHub,
+		Bus: realtimeBus,
+	}
+	groupController = controllers.GroupController{
 		Hub: wsHub,
 		Bus: realtimeBus,
 	}
