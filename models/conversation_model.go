@@ -945,12 +945,16 @@ func findMemberWithDB(db *gorm.DB, conversationID int64, userID int64) (Conversa
 		return ConversationMember{}, ErrInvalidMember
 	}
 	var member ConversationMember
-	err := db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).First(&member).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ConversationMember{}, ErrInvalidMember
+	// “没有旧成员记录”是首次加群的正常分支。这里不用 First，否则 GORM 会把
+	// 正常的零行结果以 record not found 记为错误日志，造成接口失败的假象。
+	result := db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).
+		Limit(1).
+		Find(&member)
+	if result.Error != nil {
+		return ConversationMember{}, fmt.Errorf("查询会话成员失败: %w", result.Error)
 	}
-	if err != nil {
-		return ConversationMember{}, fmt.Errorf("查询会话成员失败: %w", err)
+	if result.RowsAffected == 0 {
+		return ConversationMember{}, ErrInvalidMember
 	}
 	return member, nil
 }
