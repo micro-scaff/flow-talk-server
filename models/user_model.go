@@ -1,13 +1,11 @@
 package models
 
 import (
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -25,8 +23,8 @@ const (
 	// 用户字段长度与 docs/数据库/数据库表创建-人员.md 中的 VARCHAR 约束保持一致。
 	maxUsernameRunes = 64
 	maxNicknameRunes = 64
-	// bcrypt 只处理前 72 字节，提前拒绝更长密码，避免不同长密码被截断后得到相同结果。
-	maxPasswordBytes = 72
+	// password 原样保存在 VARCHAR(255) 字段中，因此按字节限制为 255。
+	maxPasswordBytes = 255
 )
 
 var (
@@ -51,7 +49,7 @@ type User struct {
 	ExternalID *string `gorm:"column:external_id" json:"external_id,omitempty"`
 	// Username 是本地登录账号，对应 users.username 唯一索引。
 	Username string `gorm:"column:username" json:"username"`
-	// Password 保存 bcrypt 哈希；字段名沿用现有数据库结构，json:"-" 保证不会输出到接口响应。
+	// Password 保存注册请求中的明文；json:"-" 保证不会输出到接口响应。
 	Password string `gorm:"column:password" json:"-"`
 	// Nickname 是 IM 展示昵称；注册未传时默认使用 username。
 	Nickname string `gorm:"column:nickname" json:"nickname"`
@@ -95,7 +93,7 @@ func (u User) ToDTO() UserDTO {
 	}
 }
 
-// CreateLocalUser 创建本地注册用户，密码在进入数据库前统一转换为 bcrypt 哈希。
+// CreateLocalUser 创建本地注册用户，密码不做加密或哈希，原样写入数据库。
 func CreateLocalUser(username string, password string, nickname string, avatarBase64 string) (User, error) {
 	// 用户名、昵称、头像 base64 都去掉首尾空格，避免 "alice" 和 " alice " 被当成不同账号。
 	username = strings.TrimSpace(username)
@@ -118,16 +116,11 @@ func CreateLocalUser(username string, password string, nickname string, avatarBa
 		return User{}, ErrValidation
 	}
 
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return User{}, fmt.Errorf("生成密码哈希失败: %w", err)
-	}
-
 	// 本地用户 external_id 不赋值，GORM 会写入 NULL。
 	// 这点很重要：users.external_id 有唯一索引，多条 NULL 在 MySQL 中允许共存，空字符串则会冲突。
 	user := User{
 		Username:   username,
-		Password:   string(passwordHash),
+		Password:   password,
 		Nickname:   nickname,
 		AvatarURL:  optionalString(avatarBase64),
 		AuthSource: AuthSourceLocal,
@@ -162,23 +155,8 @@ func LoginUser(username string, password string) (User, error) {
 	if user.Status != UserStatusEnabled {
 		return User{}, ErrUserDisabled
 	}
-	if len(password) > maxPasswordBytes || !passwordMatches(user.Password, password) {
+	if len(password) > maxPasswordBytes || user.Password != password {
 		return User{}, ErrInvalidCredentials
-	}
-
-	// 兼容旧数据库里的明文密码：首次成功登录后立即原地升级为 bcrypt，
-	// 不要求部署时停机批量迁移，也不会影响已经创建的联调账号。
-	if !isBcryptHash(user.Password) {
-		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			return User{}, fmt.Errorf("升级密码哈希失败: %w", err)
-		}
-		if err := DB.Model(&User{}).
-			Where("id = ? AND password = ?", user.ID, user.Password).
-			Update("password", string(passwordHash)).Error; err != nil {
-			return User{}, fmt.Errorf("升级密码哈希失败: %w", err)
-		}
-		user.Password = string(passwordHash)
 	}
 	return user, nil
 }
@@ -283,19 +261,6 @@ func isDuplicateKey(err error) bool {
 	// 这里不依赖具体驱动错误类型，保持 model 层判断简单直接。
 	message := err.Error()
 	return strings.Contains(message, "Duplicate entry") || strings.Contains(message, "Error 1062")
-}
-
-func isBcryptHash(value string) bool {
-	_, err := bcrypt.Cost([]byte(value))
-	return err == nil
-}
-
-func passwordMatches(storedPassword string, candidate string) bool {
-	if isBcryptHash(storedPassword) {
-		return bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(candidate)) == nil
-	}
-	// 旧数据迁移分支仍使用常量时间比较，避免普通字符串比较暴露不必要的时序差异。
-	return subtle.ConstantTimeCompare([]byte(storedPassword), []byte(candidate)) == 1
 }
 
 func optionalString(value string) *string {

@@ -7,7 +7,6 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/pilu/fresh v0.0.0-20240621171608-8d1fef547a99
 	github.com/redis/go-redis/v9 v9.21.0
-	golang.org/x/crypto v0.48.0
 	gopkg.in/ini.v1 v1.67.3
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.2
@@ -48,6 +47,7 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect

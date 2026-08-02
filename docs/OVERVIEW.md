@@ -129,7 +129,7 @@ HTTP / WebSocket
 
 - JWT 使用 HS256，只包含用户 ID、用户名、签发时间和过期时间。
 - 当前没有 refresh token、主动登出或 token 黑名单；token 失效后需要重新登录。
-- 本地用户密码使用 bcrypt 哈希保存在 `users.password`；旧数据库中的明文密码会在首次成功登录后自动原地升级。
+- 本地用户密码不做加密或哈希，注册时原样保存在 `users.password`，登录时直接比较明文。
 - 普通 API 请求体统一限制为 5 MiB；注册接口为容纳最大 10 MiB 的 Base64 头像，单独使用 14 MiB 请求体上限；WebSocket 单事件限制为 64 KiB，multipart 资源上传使用独立的 100 MiB 上限。
 - 内置 `demo` 外部登录只校验 access token 非空，不代表真实第三方认证。
 - 外部用户再次登录时只同步昵称和头像，不覆盖内部禁用状态；已禁用用户不能换取新的 IM JWT。
@@ -718,7 +718,7 @@ GET /api/ws?token={jwt}&device_id={device_id}
 - 当前未读数基于已读游标计算，数据量变大后可以再做缓存或冗余计数。
 - WebSocket 连接 75 秒没有收到应用事件会被服务端回收；客户端应每 25 到 30 秒发送一次 `ping`。
 - `presence.changed`、`conversation.unread.changed` 和 `conversation.changed` 是增量通知；登录初始化、重连和页面重新可见时仍应使用 HTTP 快照校准。
-- 本地密码已经使用 bcrypt 哈希；生产环境还应增加登录限流、弱密码策略和凭证泄露监测。
+- 本地密码当前以明文保存和比较；部署环境需要严格限制数据库访问，并使用 HTTPS 保护传输过程。
 
 ## 当前实现边界
 
