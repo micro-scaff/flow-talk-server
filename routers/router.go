@@ -137,6 +137,7 @@ func InitRouter(engine *gin.Engine, cfg models.AppConfig) {
 		{
 			messages.POST("/search", searchController.SearchMine)
 			messages.POST("/receipts", receiptController.Index)
+			messages.POST("/recall", messageController.Recall)
 			messages.POST("/read", receiptController.Read)
 			messages.POST("/unread", receiptController.Unread)
 		}

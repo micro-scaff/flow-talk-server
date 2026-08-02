@@ -23,6 +23,8 @@ const (
 
 	// MessageStatusNormal 表示消息正常展示。
 	MessageStatusNormal = "normal"
+	// MessageStatusRecalled 表示发送者已撤回，消息内容仍保留在数据库中。
+	MessageStatusRecalled = "recalled"
 )
 
 const (
@@ -230,6 +232,49 @@ func ListMessages(userID int64, conversationID int64, beforeID int64, limit int)
 	}, nil
 }
 
+// RecallMessage 软撤回消息：数据库保留消息正文，只把状态标记为 recalled。
+// 当前版本只允许发送者本人撤回自己的正常消息；接口、搜索和未读统计只展示 normal 消息。
+func RecallMessage(userID int64, messageID int64) error {
+	if userID <= 0 || messageID <= 0 {
+		return ErrValidation
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		message, err := findMessageByIDWithDB(tx, messageID)
+		if err != nil {
+			return err
+		}
+
+		if _, err := ensureActiveMemberWithDB(tx, userID, message.ConversationID); err != nil {
+			return err
+		}
+
+		if message.SenderID != userID {
+			return ErrMessageForbidden
+		}
+
+		if message.Status == MessageStatusRecalled {
+			return nil
+		}
+
+		if message.Status != MessageStatusNormal {
+			return ErrValidation
+		}
+
+		if err := tx.Model(&Message{}).
+			Where("id = ? AND status = ?", message.ID, MessageStatusNormal).
+			Update("status", MessageStatusRecalled).Error; err != nil {
+			return err
+		}
+
+		return refreshConversationLastMessageAfterRecall(tx, message)
+	})
+	if err != nil {
+		return fmt.Errorf("撤回消息失败: %w", err)
+	}
+	return nil
+}
+
 // MarkConversationRead 更新当前用户在会话中的已读游标。
 func MarkConversationRead(userID int64, conversationID int64, lastReadMessageID int64) (ConversationUnreadStateDTO, error) {
 	if userID <= 0 || conversationID <= 0 || lastReadMessageID <= 0 {
@@ -281,6 +326,47 @@ func MarkConversationRead(userID int64, conversationID int64, lastReadMessageID 
 // FindMessageByID 根据消息 ID 查询消息。
 func FindMessageByID(messageID int64) (Message, error) {
 	return findMessageByIDWithDB(DB, messageID)
+}
+
+func refreshConversationLastMessageAfterRecall(db *gorm.DB, recalledMessage Message) error {
+	var conversation Conversation
+	err := db.Select("id", "last_message_id").
+		First(&conversation, recalledMessage.ConversationID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrConversationNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("查询会话失败: %w", err)
+	}
+
+	if int64Value(conversation.LastMessageID) != recalledMessage.ID {
+		return nil
+	}
+
+	var previousMessage Message
+	err = db.Where("conversation_id = ? AND status = ? AND id < ?", recalledMessage.ConversationID, MessageStatusNormal, recalledMessage.ID).
+		Order("id desc").
+		Limit(1).
+		Find(&previousMessage).Error
+	if err != nil {
+		return fmt.Errorf("查询上一条正常消息失败: %w", err)
+	}
+
+	updates := map[string]any{}
+	if previousMessage.ID > 0 {
+		updates["last_message_id"] = previousMessage.ID
+		updates["last_message_at"] = previousMessage.SentAt
+	} else {
+		updates["last_message_id"] = nil
+		updates["last_message_at"] = nil
+	}
+
+	if err := db.Model(&Conversation{}).
+		Where("id = ?", recalledMessage.ConversationID).
+		Updates(updates).Error; err != nil {
+		return fmt.Errorf("更新会话最后消息失败: %w", err)
+	}
+	return nil
 }
 
 // EnsureMessageAccess 复用会话 active 成员校验，并把错误转换到消息领域。

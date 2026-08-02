@@ -40,6 +40,11 @@ type MarkReadRequest struct {
 	LastReadMessageID int64 `json:"last_read_message_id" binding:"required"`
 }
 
+// RecallMessageRequest 是撤回消息的请求体。
+type RecallMessageRequest struct {
+	MessageID int64 `json:"message_id" binding:"required"`
+}
+
 // Create 发送消息并写入 messages 表。
 func (ctl MessageController) Create(c *gin.Context) {
 	user, ok := currentUserOrUnauthorized(c)
@@ -123,6 +128,45 @@ func (ctl MessageController) MarkRead(c *gin.Context) {
 		log.Printf("已读状态已保存但实时发布失败: user_id=%d conversation_id=%d err=%v", user.ID, req.ConversationID, err)
 	}
 	responses.Success(c, state, "标记已读成功")
+}
+
+// Recall 软撤回消息。真实消息仍保留在数据库中，只把状态标记为 recalled。
+func (ctl MessageController) Recall(c *gin.Context) {
+	user, ok := currentUserOrUnauthorized(c)
+	if !ok {
+		return
+	}
+
+	var req RecallMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		responses.Error(c, http.StatusBadRequest, "参数校验失败")
+		return
+	}
+
+	if err := models.RecallMessage(user.ID, req.MessageID); err != nil {
+		writeMessageError(c, err)
+		return
+	}
+
+	message, err := models.FindMessageByID(req.MessageID)
+	if err != nil {
+		writeMessageError(c, err)
+		return
+	}
+	memberIDs, err := models.ListActiveConversationMemberIDs(message.ConversationID)
+	if err != nil {
+		log.Printf("消息已撤回但读取通知成员失败: message_id=%d err=%v", req.MessageID, err)
+	} else if err := publishConversationChanged(ctl.Bus, ctl.Hub, models.ConversationChangedEvent{
+		UserIDs: memberIDs,
+		Change: models.ConversationChangedPayload{
+			ConversationID: message.ConversationID,
+			ChangeType:     models.ConversationChangeMessage,
+		},
+	}); err != nil {
+		log.Printf("消息已撤回但实时通知失败: message_id=%d err=%v", req.MessageID, err)
+	}
+
+	responses.Success(c, nil, "消息已撤回")
 }
 
 // writeMessageError 把消息领域错误翻译成 HTTP 状态码。

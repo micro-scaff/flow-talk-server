@@ -28,6 +28,8 @@ const (
 
 	// ConversationChangeMembers 覆盖成员增删、退出及角色变化。
 	ConversationChangeMembers = "members"
+	// ConversationChangeMessage 表示会话消息可见性变化，例如软撤回。
+	ConversationChangeMessage = "message"
 	// ConversationChangeProfile 表示群名称或头像变化。
 	ConversationChangeProfile = "profile"
 )

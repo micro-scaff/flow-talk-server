@@ -26,7 +26,7 @@
     },
     {
       "name": "消息",
-      "description": "消息发送、历史消息和已读接口"
+      "description": "消息发送、历史消息、软撤回和已读接口"
     },
     {
       "name": "WebSocket",
@@ -1514,6 +1514,66 @@
         }
       }
     },
+    "/api/messages/recall": {
+      "post": {
+        "tags": [
+          "消息"
+        ],
+        "summary": "撤回消息",
+        "description": "通过请求体传入消息 ID，软撤回当前用户本人发送的正常消息。服务端不会删除 messages.content，只把消息状态更新为 recalled；历史消息、搜索、未读统计和会话最后消息只展示 normal 消息。撤回成功后服务端向会话 active 成员推送 conversation.changed，change_type 为 message。",
+        "operationId": "recallMessage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecallMessageRequest"
+              },
+              "example": {
+                "message_id": 1001
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "消息已撤回",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NullApiResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "data": null,
+                  "message": "消息已撤回"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/api/messages/receipts": {
       "post": {
         "tags": [
@@ -2360,9 +2420,10 @@
             "type": "string",
             "example": "normal",
             "enum": [
-              "normal"
+              "normal",
+              "recalled"
             ],
-            "description": "消息状态；当前仅保留 normal"
+            "description": "消息状态；normal 表示正常展示，recalled 表示已软撤回。列表、搜索和未读统计只返回 normal 消息"
           },
           "sent_at": {
             "type": "string",
@@ -2454,6 +2515,23 @@
           "message": {
             "type": "string",
             "example": "获取历史消息成功"
+          }
+        }
+      },
+      "NullApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "data": {
+            "nullable": true,
+            "example": null
+          },
+          "message": {
+            "type": "string",
+            "example": "操作成功"
           }
         }
       },
@@ -2867,6 +2945,20 @@
             "default": 20,
             "maximum": 100,
             "example": 20
+          }
+        }
+      },
+      "RecallMessageRequest": {
+        "type": "object",
+        "required": [
+          "message_id"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1001,
+            "description": "要撤回的消息 ID"
           }
         }
       },
